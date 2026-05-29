@@ -34,22 +34,15 @@ async def get_or_create_seller(
     settings: Settings,
     tg_user: TelegramUser,
 ) -> Seller | None:
+    del settings
     result = await session.execute(select(Seller).where(Seller.telegram_id == tg_user.id))
     seller = result.scalar_one_or_none()
     if seller is not None:
+        seller.username = tg_user.username
+        seller.full_name = tg_user.full_name
         return seller if seller.is_active else None
 
-    if tg_user.id not in settings.seller_telegram_ids:
-        return None
-
-    seller = Seller(
-        telegram_id=tg_user.id,
-        username=tg_user.username,
-        full_name=tg_user.full_name,
-    )
-    session.add(seller)
-    await session.flush()
-    return seller
+    return None
 
 
 def build_customer_deep_link(settings: Settings, user_id: int) -> str:

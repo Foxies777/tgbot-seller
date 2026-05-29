@@ -49,6 +49,26 @@
       <button type="submit">Создать</button>
     </form>
   </article>
+
+  <article class="card">
+    <h2>Продавец</h2>
+    <form method="post" action="/admin/sellers">
+      <label>Telegram ID <input type="number" name="telegram_id" required></label>
+      <label>Имя <input name="full_name" required></label>
+      <label>Username без @ <input name="username"></label>
+      <button type="submit">Добавить продавца</button>
+    </form>
+  </article>
+
+  <article class="card">
+    <h2>Администратор</h2>
+    <form method="post" action="/admin/admins">
+      <label>Логин <input name="username" required></label>
+      <label>Имя <input name="full_name"></label>
+      <label>Пароль <input type="password" name="password" minlength="8" required></label>
+      <button type="submit">Добавить админа</button>
+    </form>
+  </article>
 </section>
 
 <section class="card">
@@ -73,6 +93,16 @@
     <ul>
       {% for item in promos %}
       <li>{{ item.code }}: {{ item.points }} баллов, использовано {{ item.used_count }}</li>
+      {% else %}
+      <li class="muted">Пока нет</li>
+      {% endfor %}
+    </ul>
+  </article>
+  <article class="card">
+    <h2>Продавцы</h2>
+    <ul>
+      {% for item in sellers %}
+      <li>{{ item.full_name }}: {{ item.telegram_id }}{% if item.username %} (@{{ item.username }}){% endif %}</li>
       {% else %}
       <li class="muted">Пока нет</li>
       {% endfor %}

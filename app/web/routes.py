@@ -8,13 +8,23 @@ from sqlalchemy import desc, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.security import (
+    hash_password,
     make_session_token,
     random_idempotency_key,
-    verify_admin_password,
+    verify_password,
     verify_session_token,
 )
 from app.db.session import get_session
-from app.models import AuditLog, HolidayBonus, LoyaltySettings, PromoCode, Transaction, User
+from app.models import (
+    Admin,
+    AuditLog,
+    HolidayBonus,
+    LoyaltySettings,
+    PromoCode,
+    Seller,
+    Transaction,
+    User,
+)
 from app.services.loyalty import InsufficientPointsError, LoyaltyService
 
 router = APIRouter()
@@ -36,26 +46,36 @@ async def healthz() -> dict[str, str]:
 
 @router.get("/scan", response_class=HTMLResponse)
 async def scan(request: Request):
-    return templates.TemplateResponse("scan.html", {"request": request})
+    return templates.TemplateResponse(request, "scan.html")
 
 
 @router.get("/admin/login", response_class=HTMLResponse)
 async def login_page(request: Request):
-    return templates.TemplateResponse("login.html", {"request": request, "error": None})
+    return templates.TemplateResponse(request, "login.html", {"error": None})
 
 
 @router.post("/admin/login")
-async def login(request: Request, password: RequiredStrForm):
+async def login(
+    request: Request,
+    username: RequiredStrForm,
+    password: RequiredStrForm,
+    session: SessionDep,
+):
     settings = request.app.state.settings
-    if not verify_admin_password(settings, password):
+    result = await session.execute(
+        select(Admin).where(Admin.username == username, Admin.is_active.is_(True))
+    )
+    admin = result.scalar_one_or_none()
+    if admin is None or not verify_password(password, admin.password_hash):
         return templates.TemplateResponse(
+            request,
             "login.html",
-            {"request": request, "error": "Неверный пароль"},
+            {"error": "Неверный пароль"},
             status_code=401,
         )
 
     response = RedirectResponse("/admin", status_code=303)
-    token = make_session_token(settings, "admin", timedelta(hours=12))
+    token = make_session_token(settings, str(admin.id), timedelta(hours=12))
     response.set_cookie(
         settings.admin_session_cookie,
         token,
@@ -91,15 +111,17 @@ async def admin_dashboard(
         await session.execute(select(HolidayBonus).order_by(desc(HolidayBonus.id)))
     ).scalars()
     promos = (await session.execute(select(PromoCode).order_by(desc(PromoCode.id)))).scalars()
+    sellers = (await session.execute(select(Seller).order_by(desc(Seller.id)))).scalars()
     return templates.TemplateResponse(
+        request,
         "admin.html",
         {
-            "request": request,
             "settings": loyalty_settings,
             "users_count": users_count or 0,
             "transactions": list(transactions),
             "holidays": list(holidays),
             "promos": list(promos),
+            "sellers": list(sellers),
         },
     )
 
@@ -116,8 +138,9 @@ async def admin_transactions(
         await session.execute(select(Transaction).order_by(desc(Transaction.created_at)).limit(100))
     ).scalars()
     return templates.TemplateResponse(
+        request,
         "transactions.html",
-        {"request": request, "transactions": list(transactions)},
+        {"transactions": list(transactions)},
     )
 
 
@@ -179,7 +202,7 @@ async def adjust_balance(
         await LoyaltyService(session, request.app.state.settings).adjust_points(
             user_id=user_id,
             points_delta=points_delta,
-            actor_id="admin",
+            actor_id=_admin_subject(request) or "admin",
             idempotency_key=random_idempotency_key("admin-adjust"),
             comment=comment,
         )
@@ -237,12 +260,74 @@ async def create_promocode(
     return RedirectResponse("/admin", status_code=303)
 
 
+@router.post("/admin/sellers")
+async def create_seller(
+    request: Request,
+    telegram_id: RequiredIntForm,
+    full_name: RequiredStrForm,
+    session: SessionDep,
+    username: OptionalStrForm = "",
+):
+    if not _is_admin(request):
+        return RedirectResponse("/admin/login", status_code=303)
+
+    result = await session.execute(select(Seller).where(Seller.telegram_id == telegram_id))
+    seller = result.scalar_one_or_none()
+    if seller is None:
+        session.add(
+            Seller(
+                telegram_id=telegram_id,
+                full_name=full_name,
+                username=username or None,
+            )
+        )
+    else:
+        seller.full_name = full_name
+        seller.username = username or None
+        seller.is_active = True
+    await session.commit()
+    return RedirectResponse("/admin", status_code=303)
+
+
+@router.post("/admin/admins")
+async def create_admin(
+    request: Request,
+    username: RequiredStrForm,
+    password: RequiredStrForm,
+    session: SessionDep,
+    full_name: OptionalStrForm = "",
+):
+    if not _is_admin(request):
+        return RedirectResponse("/admin/login", status_code=303)
+
+    result = await session.execute(select(Admin).where(Admin.username == username))
+    admin = result.scalar_one_or_none()
+    if admin is None:
+        session.add(
+            Admin(
+                username=username,
+                password_hash=hash_password(password),
+                full_name=full_name or None,
+            )
+        )
+    else:
+        admin.password_hash = hash_password(password)
+        admin.full_name = full_name or admin.full_name
+        admin.is_active = True
+    await session.commit()
+    return RedirectResponse("/admin", status_code=303)
+
+
 def _is_admin(request: Request) -> bool:
+    return _admin_subject(request) is not None
+
+
+def _admin_subject(request: Request) -> str | None:
     settings = request.app.state.settings
     token = request.cookies.get(settings.admin_session_cookie)
     if not token:
-        return False
-    return verify_session_token(settings, token) == "admin"
+        return None
+    return verify_session_token(settings, token)
 
 
 async def _get_or_create_settings(request: Request, session: AsyncSession) -> LoyaltySettings:

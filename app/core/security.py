@@ -1,15 +1,15 @@
+import base64
 from datetime import UTC, datetime, timedelta
-from hashlib import sha256
+from hashlib import pbkdf2_hmac, sha256
 from hmac import compare_digest
-from secrets import token_urlsafe
+from secrets import token_bytes, token_urlsafe
 from typing import Any
 
 from itsdangerous import BadSignature, SignatureExpired, URLSafeTimedSerializer
-from passlib.context import CryptContext
 
 from app.core.config import Settings
 
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+PASSWORD_HASH_ITERATIONS = 390_000
 
 
 def _serializer(settings: Settings, salt: str) -> URLSafeTimedSerializer:
@@ -54,9 +54,36 @@ def verify_session_token(settings: Settings, token: str) -> str | None:
     return str(subject) if subject else None
 
 
-def verify_admin_password(settings: Settings, candidate: str) -> bool:
-    expected = settings.admin_password.get_secret_value()
-    return compare_digest(candidate, expected)
+def hash_password(password: str) -> str:
+    salt = token_bytes(16)
+    password_hash = pbkdf2_hmac(
+        "sha256",
+        password.encode("utf-8"),
+        salt,
+        PASSWORD_HASH_ITERATIONS,
+    )
+    return "$".join(
+        [
+            "pbkdf2_sha256",
+            str(PASSWORD_HASH_ITERATIONS),
+            base64.urlsafe_b64encode(salt).decode("ascii"),
+            base64.urlsafe_b64encode(password_hash).decode("ascii"),
+        ]
+    )
+
+
+def verify_password(candidate: str, password_hash: str) -> bool:
+    try:
+        algorithm, iterations_raw, salt_raw, expected_raw = password_hash.split("$", 3)
+        iterations = int(iterations_raw)
+        salt = base64.urlsafe_b64decode(salt_raw.encode("ascii"))
+        expected = base64.urlsafe_b64decode(expected_raw.encode("ascii"))
+    except (ValueError, TypeError):
+        return False
+    if algorithm != "pbkdf2_sha256":
+        return False
+    actual = pbkdf2_hmac("sha256", candidate.encode("utf-8"), salt, iterations)
+    return compare_digest(actual, expected)
 
 
 def generate_idempotency_key(*parts: object) -> str:
