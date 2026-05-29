@@ -1,0 +1,1 @@
+"""Telegram loyalty bonus MVP."""

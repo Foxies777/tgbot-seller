@@ -1,0 +1,11 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="card narrow">
+  <h1>Сканер QR</h1>
+  <p class="muted">Разрешите доступ к камере и наведите телефон на QR-код клиента.</p>
+  <video id="preview" autoplay playsinline></video>
+  <p id="scan-status">Ожидание камеры...</p>
+  <noscript>Для сканера нужен JavaScript. Можно открыть QR-код обычной камерой телефона.</noscript>
+</section>
+<script src="/static/scanner.js"></script>
+{% endblock %}

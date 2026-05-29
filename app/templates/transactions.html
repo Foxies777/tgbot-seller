@@ -1,0 +1,10 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="topbar">
+  <h1>Транзакции</h1>
+  <a class="button secondary" href="/admin">Назад</a>
+</div>
+<section class="card">
+  {% include "partials/transactions_table.html" %}
+</section>
+{% endblock %}

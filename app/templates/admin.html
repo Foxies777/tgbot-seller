@@ -1,0 +1,82 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="topbar">
+  <h1>Админ-панель</h1>
+  <form method="post" action="/admin/logout"><button class="secondary">Выйти</button></form>
+</div>
+
+<section class="grid">
+  <article class="card">
+    <h2>Настройки бонусов</h2>
+    <form method="post" action="/admin/settings">
+      <label>% начисления <input type="number" name="earn_percent" min="0" max="100" value="{{ settings.earn_percent }}" required></label>
+      <label>% максимального списания <input type="number" name="max_redeem_percent" min="0" max="100" value="{{ settings.max_redeem_percent }}" required></label>
+      <label>Срок жизни баллов, дней <input type="number" name="point_ttl_days" min="1" value="{{ settings.point_ttl_days }}" required></label>
+      <label class="row"><input type="checkbox" name="redeem_enabled" value="true" {% if settings.redeem_enabled %}checked{% endif %}> Списание включено</label>
+      <button type="submit">Сохранить</button>
+    </form>
+  </article>
+
+  <article class="card">
+    <h2>Ручная коррекция</h2>
+    <p class="muted">Клиентов всего: {{ users_count }}</p>
+    <form method="post" action="/admin/adjust">
+      <label>ID клиента <input type="number" name="user_id" min="1" required></label>
+      <label>Изменение баллов <input type="number" name="points_delta" required></label>
+      <label>Комментарий <textarea name="comment" required></textarea></label>
+      <button type="submit">Применить</button>
+    </form>
+  </article>
+
+  <article class="card">
+    <h2>Праздничный процент</h2>
+    <form method="post" action="/admin/holidays">
+      <label>Название <input name="title" required></label>
+      <label>С <input type="date" name="starts_on" required></label>
+      <label>По <input type="date" name="ends_on" required></label>
+      <label>% начисления <input type="number" name="earn_percent" min="0" max="100" required></label>
+      <button type="submit">Добавить</button>
+    </form>
+  </article>
+
+  <article class="card">
+    <h2>Промокод</h2>
+    <form method="post" action="/admin/promocodes">
+      <label>Код <input name="code" required></label>
+      <label>Баллы <input type="number" name="points" min="1" required></label>
+      <label>Лимит использований <input type="number" name="max_uses" min="1"></label>
+      <label>Истекает <input type="datetime-local" name="expires_at"></label>
+      <button type="submit">Создать</button>
+    </form>
+  </article>
+</section>
+
+<section class="card">
+  <h2>Последние транзакции</h2>
+  <p><a href="/admin/transactions">Показать больше</a></p>
+  {% include "partials/transactions_table.html" %}
+</section>
+
+<section class="grid">
+  <article class="card">
+    <h2>Праздничные дни</h2>
+    <ul>
+      {% for item in holidays %}
+      <li>{{ item.title }}: {{ item.starts_on }} - {{ item.ends_on }}, {{ item.earn_percent }}%</li>
+      {% else %}
+      <li class="muted">Пока нет</li>
+      {% endfor %}
+    </ul>
+  </article>
+  <article class="card">
+    <h2>Промокоды</h2>
+    <ul>
+      {% for item in promos %}
+      <li>{{ item.code }}: {{ item.points }} баллов, использовано {{ item.used_count }}</li>
+      {% else %}
+      <li class="muted">Пока нет</li>
+      {% endfor %}
+    </ul>
+  </article>
+</section>
+{% endblock %}

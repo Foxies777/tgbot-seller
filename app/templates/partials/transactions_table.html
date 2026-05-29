@@ -1,0 +1,30 @@
+<div class="table-wrap">
+  <table>
+    <thead>
+      <tr>
+        <th>ID</th>
+        <th>Клиент</th>
+        <th>Тип</th>
+        <th>Сумма</th>
+        <th>Баллы</th>
+        <th>Баланс</th>
+        <th>Дата</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for tx in transactions %}
+      <tr>
+        <td>{{ tx.id }}</td>
+        <td>{{ tx.user_id }}</td>
+        <td>{{ tx.transaction_type }}</td>
+        <td>{{ "%.2f"|format(tx.purchase_amount_minor / 100) }}</td>
+        <td>{{ tx.points_delta }}</td>
+        <td>{{ tx.balance_before }} → {{ tx.balance_after }}</td>
+        <td>{{ tx.created_at }}</td>
+      </tr>
+      {% else %}
+      <tr><td colspan="7" class="muted">Транзакций пока нет</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
