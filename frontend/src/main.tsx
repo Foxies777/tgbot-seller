@@ -3,6 +3,7 @@ import ReactDOM from "react-dom/client";
 
 import { App } from "./App";
 import { CookieConsent } from "./components/CookieConsent";
+import { initServiceWorker } from "./serviceWorker";
 import "./styles/app.css";
 
 ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
@@ -12,8 +13,6 @@ ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
   </React.StrictMode>
 );
 
-if ("serviceWorker" in navigator) {
-  window.addEventListener("load", () => {
-    void navigator.serviceWorker.register("/sw.js", { scope: "/" });
-  });
-}
+window.addEventListener("load", () => {
+  void initServiceWorker();
+});

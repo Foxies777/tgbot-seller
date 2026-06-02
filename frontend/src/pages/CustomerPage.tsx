@@ -94,8 +94,8 @@ export function CustomerPage() {
       const value = `${window.location.origin}/qr/${qrData.qr_token}`;
       void QRCode.toCanvas(canvas, value, {
         width: side,
-        margin: 1,
-        color: { dark: "#ffffff", light: "#1e40af00" }
+        margin: 2,
+        color: { dark: "#000000", light: "#ffffff" }
       });
     };
 

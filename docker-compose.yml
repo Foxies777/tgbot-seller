@@ -3,6 +3,8 @@ services:
   frontend:
     image: node:22-alpine
     working_dir: /app/frontend
+    environment:
+      VITE_ENABLE_SW: "0"
     volumes:
       - .:/app
     command: ["sh", "-c", "npm install && npm run build:watch"]

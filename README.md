@@ -90,6 +90,39 @@ docker compose up --build
 
 Для камеры QR и установки PWA на iPhone используйте именно **HTTPS** (`:8443`), не HTTP.
 
+### Ошибка SSL / Service Worker при доступе с телефона
+
+**Симптомы в консоли браузера:**
+
+```
+An SSL certificate error occurred when fetching the script.
+SecurityError: Failed to register a ServiceWorker ... /sw.js
+```
+
+**Причина:** самоподписанный сертификат не содержит IP вашего ПК в Subject Alternative Name (SAN). Браузер блокирует Service Worker и доступ к камере — QR-сканер на `/seller` не заработает.
+
+**Исправление:**
+
+1. Узнайте IPv4 ПК в Wi‑Fi (`ipconfig` на Windows).
+2. Добавьте в `.env`:
+   ```env
+   CERT_EXTRA_IP=192.168.1.161
+   ```
+   (подставьте свой IP)
+3. Перегенерируйте сертификат и перезапустите nginx:
+   ```bash
+   docker compose --profile tools run --rm certgen
+   docker compose restart nginx
+   ```
+4. На **каждом устройстве** (iPhone Safari, Chrome на ПК):
+   - откройте `https://YOUR_IP:8443/seller` и подтвердите предупреждение о сертификате;
+   - очистите данные сайта (Chrome: DevTools → Application → Clear site data; iPhone: Настройки → Safari → Данные сайтов → удалить запись для IP).
+5. Проверьте: `https://YOUR_IP:8443/healthz` открывается без SSL-ошибки, в консоли нет `SecurityError` для `/sw.js`.
+
+**Обходной путь:** покупатель может назвать 6-значный код с экрана — продавец вводит его вручную на `/seller` без камеры.
+
+**Локальная разработка:** Service Worker отключён в docker-compose (`VITE_ENABLE_SW=0`), чтобы self-signed HTTPS не вызывал ошибки при обновлении страницы. Для production-сборки задайте `VITE_ENABLE_SW=1`.
+
 ## Администраторы и продавцы
 
 ### Администратор

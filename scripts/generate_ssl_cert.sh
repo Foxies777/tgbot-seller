@@ -8,10 +8,37 @@ DAYS="${CERT_DAYS:-825}"
 
 if [ -f "${CERT_FILE}" ] && [ -f "${KEY_FILE}" ] && [ "${FORCE_CERT:-0}" != "1" ]; then
   echo "Certificates already exist in ${CERTS_DIR}, skipping generation."
+  if [ -n "${CERT_EXTRA_IP:-}" ]; then
+    if ! openssl x509 -in "${CERT_FILE}" -noout -text 2>/dev/null | grep -q "IP Address:${CERT_EXTRA_IP}"; then
+      echo ""
+      echo "ERROR: Existing certificate does not include CERT_EXTRA_IP=${CERT_EXTRA_IP}."
+      echo "Service Worker and camera on https://${CERT_EXTRA_IP}:8443 will fail until you run:"
+      echo "  docker compose --profile tools run --rm certgen"
+      echo "  docker compose restart nginx"
+      echo ""
+    fi
+  fi
+  if [ -z "${CERT_EXTRA_IP:-}" ]; then
+    echo ""
+    echo "WARNING: CERT_EXTRA_IP is not set."
+    echo "HTTPS from a phone via https://YOUR_LAN_IP:8443 will fail until you:"
+    echo "  1. Set CERT_EXTRA_IP in .env to your PC's Wi-Fi IPv4"
+    echo "  2. Run: docker compose --profile tools run --rm certgen"
+    echo "  3. Run: docker compose restart nginx"
+    echo ""
+  fi
   exit 0
 fi
 
 mkdir -p "${CERTS_DIR}"
+
+if [ -z "${CERT_EXTRA_IP:-}" ]; then
+  echo ""
+  echo "WARNING: CERT_EXTRA_IP is not set."
+  echo "Certificate will only work for localhost. Phone access via LAN IP will show SSL errors."
+  echo "Set CERT_EXTRA_IP in .env and re-run certgen after changing your network."
+  echo ""
+fi
 
 DNS_NAMES="DNS.1 = localhost"
 IP_INDEX=1

@@ -239,6 +239,9 @@ body:has(.customer-page--cabinet) {
   display: block;
   max-height: 100%;
   max-width: 100%;
+  background: #fff;
+  border-radius: 20px;
+  padding: 12px;
 }
 
 .customer-qr-panel__footer {
@@ -340,15 +343,21 @@ body:has(.customer-page--cabinet) {
 .scanner {
   width: 100%;
   min-height: 260px;
+  margin-bottom: 12px;
   border-radius: 20px;
   background: #111827;
-  margin-bottom: 12px;
   overflow: hidden;
 }
 
-.scanner video {
+#seller-qr-reader video {
+  width: 100%;
   border-radius: 20px;
   object-fit: cover;
+}
+
+.scanner-hint {
+  margin: 0 0 12px;
+  text-align: center;
 }
 
 .customer-code-label {

@@ -1,10 +1,9 @@
-import { FormEvent, useEffect, useRef, useState } from "react";
-import { Html5Qrcode } from "html5-qrcode";
+import { FormEvent, useRef, useState } from "react";
 
 import { api, idempotencyKey, points, SellerCustomer } from "../api/client";
 import { Card, ErrorMessage, Field, Layout, StaffNav } from "../components/Layout";
-
-const SCANNER_ID = "seller-qr-reader";
+import { QrScanner } from "../components/QrScanner";
+import { isQrTokenLike, normalizeQrValue } from "../utils/qr";
 
 export function SellerPage() {
   const [loggedIn, setLoggedIn] = useState(false);
@@ -19,13 +18,8 @@ export function SellerPage() {
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [scanning, setScanning] = useState(false);
-  const scannerRef = useRef<Html5Qrcode | null>(null);
-
-  useEffect(() => {
-    return () => {
-      void stopScan();
-    };
-  }, []);
+  const [verifying, setVerifying] = useState(false);
+  const scanBusyRef = useRef(false);
 
   async function login(event: FormEvent) {
     event.preventDefault();
@@ -41,68 +35,53 @@ export function SellerPage() {
     }
   }
 
-  async function stopScan() {
-    const scanner = scannerRef.current;
-    if (!scanner) {
+  function handleDecoded(raw: string) {
+    if (scanBusyRef.current) {
       return;
     }
-    scannerRef.current = null;
-    try {
-      if (scanner.isScanning) {
-        await scanner.stop();
-      }
-      scanner.clear();
-    } catch {
-      // Scanner may already be stopped.
-    }
-    setScanning(false);
+    scanBusyRef.current = true;
+    const value = normalizeQrValue(raw);
+    setQrValue(value);
+    void verify(value).finally(() => {
+      setScanning(false);
+      scanBusyRef.current = false;
+    });
   }
 
-  async function startScan() {
+  function toggleScan() {
     setError(null);
     if (scanning) {
-      await stopScan();
+      scanBusyRef.current = false;
+      setScanning(false);
       return;
     }
-    try {
-      const scanner = new Html5Qrcode(SCANNER_ID);
-      scannerRef.current = scanner;
-      setScanning(true);
-      await scanner.start(
-        { facingMode: "environment" },
-        { fps: 10, qrbox: { width: 250, height: 250 } },
-        (decodedText) => {
-          setQrValue(decodedText);
-          void stopScan();
-          void verify(decodedText);
-        },
-        () => undefined
-      );
-    } catch (err) {
-      setScanning(false);
-      scannerRef.current = null;
-      setError("Не удалось открыть камеру. Проверьте HTTPS и разрешение камеры.");
-    }
+    scanBusyRef.current = false;
+    setScanning(true);
   }
 
   function resolveInputValue(code = customerCode, qr = qrValue): string {
+    const normalizedQr = normalizeQrValue(qr);
+    if (isQrTokenLike(normalizedQr)) {
+      return normalizedQr;
+    }
     const digits = code.replace(/\D/g, "");
     if (digits.length === 6) {
       return digits;
     }
-    return qr.trim();
+    return normalizedQr;
   }
 
   async function verify(explicitValue?: string) {
     setError(null);
-    const value = explicitValue?.trim() || resolveInputValue();
+    const value = normalizeQrValue(explicitValue?.trim() || resolveInputValue());
     if (value.length < 6) {
       setError("Введите 6-значный код или отсканируйте QR");
       return;
     }
+    setVerifying(true);
     try {
       const amountMinor = amountToMinor(purchaseAmount);
-      const nextCustomer = await api<SellerCustomer>("/seller/qr/verify", {
+      const nextCustomer = await api<SellerCustomer>("/seller/customers/verify", {
         method: "POST",
         body: JSON.stringify({
           qr_value: value,
@@ -121,6 +100,8 @@ export function SellerPage() {
     } catch (err) {
       setVerifiedToken(null);
       setError(err instanceof Error ? err.message : "Код недействителен или истёк. Попросите покупателя обновить QR.");
+    } finally {
+      setVerifying(false);
     }
   }
 
@@ -238,8 +219,22 @@ export function SellerPage() {
   return (
     <Layout title="Кабинет продавца" subtitle="Сканирование и продажа">
       <Card>
-        <div id={SCANNER_ID} className="scanner" />
-        <button onClick={() => void startScan()}>{scanning ? "Закрыть камеру" : "Открыть камеру"}</button>
+        <QrScanner
+          active={scanning && !verifying}
+          onDecode={handleDecoded}
+          onError={(msg) => {
+            setError(msg);
+            setScanning(false);
+          }}
+        />
+        {scanning ? (
+          <p className="muted scanner-hint">
+            {verifying ? "Проверка покупателя..." : "Наведите камеру на QR-код покупателя"}
+          </p>
+        ) : null}
+        <button onClick={toggleScan} disabled={verifying}>
+          {scanning ? "Закрыть камеру" : "Открыть камеру"}
+        </button>
         <Field label="Код покупателя (6 цифр)">
           <input
             value={customerCode}
@@ -261,6 +256,7 @@ export function SellerPage() {
             placeholder="1250.50"
           />
         </Field>
+        <ErrorMessage message={error} />
         <button className="secondary" onClick={() => void verify()}>
           Проверить покупателя
         </button>
@@ -288,7 +284,6 @@ export function SellerPage() {
               placeholder="0"
             />
           </Field>
-          <ErrorMessage message={error} />
           {message ? <p className="success">{message}</p> : null}
           <button>Провести покупку</button>
         </form>

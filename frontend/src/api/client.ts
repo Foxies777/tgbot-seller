@@ -72,24 +72,61 @@ export class ApiError extends Error {
   }
 }
 
+function isNetworkError(error: unknown): boolean {
+  if (!(error instanceof TypeError)) {
+    return false;
+  }
+  const message = error.message.toLowerCase();
+  return (
+    message.includes("failed to fetch") ||
+    message.includes("network") ||
+    message.includes("load failed")
+  );
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => {
+    window.setTimeout(resolve, ms);
+  });
+}
+
 export async function api<T>(path: string, options: RequestInit = {}): Promise<T> {
   const { headers: extraHeaders, ...rest } = options;
-  const response = await fetch(`${API_BASE}${path}`, {
-    credentials: "include",
-    ...rest,
-    headers: {
-      "Content-Type": "application/json",
-      ...(extraHeaders ?? {})
+  const maxAttempts = 3;
+  let lastError: unknown;
+
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    try {
+      const response = await fetch(`${API_BASE}${path}`, {
+        credentials: "include",
+        cache: "no-store",
+        ...rest,
+        headers: {
+          "Content-Type": "application/json",
+          ...(extraHeaders ?? {})
+        }
+      });
+      if (!response.ok) {
+        const text = await response.text();
+        throw new ApiError(formatApiError(text, response.status), response.status);
+      }
+      if (response.status === 204) {
+        return undefined as T;
+      }
+      return (await response.json()) as T;
+    } catch (error) {
+      lastError = error;
+      if (error instanceof ApiError || attempt === maxAttempts || !isNetworkError(error)) {
+        if (isNetworkError(error)) {
+          throw new Error("Нет связи с сервером. Проверьте Wi‑Fi и обновите страницу.");
+        }
+        throw error;
+      }
+      await sleep(250 * attempt);
     }
-  });
-  if (!response.ok) {
-    const text = await response.text();
-    throw new ApiError(formatApiError(text, response.status), response.status);
   }
-  if (response.status === 204) {
-    return undefined as T;
-  }
-  return (await response.json()) as T;
+
+  throw lastError;
 }
 
 function formatApiError(text: string, status: number): string {

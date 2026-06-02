@@ -1,4 +1,4 @@
-const CACHE_NAME = "bonus-loyalty-shell-v3";
+const CACHE_NAME = "bonus-loyalty-shell-v4";
 const SHELL_ASSETS = [
   "/",
   "/app",
@@ -10,8 +10,20 @@ const SHELL_ASSETS = [
   "/static/pwa/manifest.webmanifest"
 ];
 
+async function cacheShellAssets(cache) {
+  await Promise.all(
+    SHELL_ASSETS.map(async (url) => {
+      try {
+        await cache.add(url);
+      } catch {
+        // Skip assets that fail (e.g. invalid TLS during install).
+      }
+    })
+  );
+}
+
 self.addEventListener("install", (event) => {
-  event.waitUntil(caches.open(CACHE_NAME).then((cache) => cache.addAll(SHELL_ASSETS)));
+  event.waitUntil(caches.open(CACHE_NAME).then((cache) => cacheShellAssets(cache)));
 });
 
 self.addEventListener("activate", (event) => {

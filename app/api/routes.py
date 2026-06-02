@@ -301,7 +301,8 @@ async def dismiss_offer(offer_id: int, customer_id: CustomerIdDep, session: Sess
     return {"status": "ok"}
 
 
-@router.post("/seller/qr/verify", response_model=SellerCustomerResponse)
+@router.post("/seller/customers/verify", response_model=SellerCustomerResponse)
+@router.post("/seller/qr/verify", response_model=SellerCustomerResponse, include_in_schema=False)
 async def verify_seller_qr(
     payload: VerifyQrRequest,
     seller_id: SellerIdDep,
@@ -584,11 +585,14 @@ async def _user_from_qr_value(session: SessionDep, settings: SettingsDep, qr_val
 
 
 def _extract_qr_token(qr_value: str) -> str:
-    if "/qr/" in qr_value:
-        return qr_value.rstrip("/").rsplit("/", 1)[-1]
-    if qr_value.startswith("customer:"):
-        return qr_value.removeprefix("customer:")
-    return qr_value
+    stripped = qr_value.strip()
+    if "/qr/" in stripped:
+        token = stripped.rstrip("/").rsplit("/", 1)[-1]
+        token = token.split("?", 1)[0].split("#", 1)[0]
+        return token
+    if stripped.startswith("customer:"):
+        return stripped.removeprefix("customer:")
+    return stripped
 
 
 def _transaction_response(transaction: Transaction) -> TransactionResponse:
