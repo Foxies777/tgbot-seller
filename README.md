@@ -129,6 +129,8 @@ docker compose exec app python -m app.cli create-seller --telegram-id 123456789 
 
 Исходники — в `frontend/`, сборка попадает в `app/static/pwa`. В Docker это делается автоматически на этапе `docker build`.
 
+При `docker compose up` сервис `frontend` пересобирает PWA при каждом изменении в `frontend/` (`npm run build:watch`) и пишет результат в `app/static/pwa/` на хосте — контейнер `app` отдаёт актуальные файлы без полного `docker build`.
+
 Локальная пересборка без полного образа:
 
 ```bash

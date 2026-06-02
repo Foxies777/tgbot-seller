@@ -1,4 +1,4 @@
-const CACHE_NAME = "bonus-loyalty-shell-v2";
+const CACHE_NAME = "bonus-loyalty-shell-v3";
 const SHELL_ASSETS = [
   "/",
   "/app",

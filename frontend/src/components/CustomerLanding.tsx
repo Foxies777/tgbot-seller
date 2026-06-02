@@ -14,8 +14,11 @@ export function CustomerLanding() {
           <path d="M20 22h8" stroke="#fff" strokeWidth="2" strokeLinecap="round" />
         </svg>
       </div>
-      <h1 className="customer-landing__title">Бонусы</h1>
-      <p className="customer-landing__subtitle">Привлекайте и удерживайте клиентов</p>
+
+      <h1 className="customer-landing__title">Бонусы для вас</h1>
+      <p className="customer-landing__subtitle">
+        Получайте бонусы, кэшбек и выгодные предложения
+      </p>
 
       <ul className="customer-landing__features">
         <li>
@@ -36,10 +39,11 @@ export function CustomerLanding() {
             </svg>
           </span>
           <div>
-            <strong>Кэшбек</strong>
-            <p>Начисляйте бонусы клиентам</p>
+            <strong>Кэшбек с покупок</strong>
+            <p>Возвращайте часть суммы бонусами после каждой покупки</p>
           </div>
         </li>
+
         <li>
           <span className="feature-icon feature-icon--orange" aria-hidden="true">
             <svg viewBox="0 0 24 24" fill="none">
@@ -49,10 +53,11 @@ export function CustomerLanding() {
             </svg>
           </span>
           <div>
-            <strong>Бонусы на День Рождения</strong>
-            <p>Порадуйте клиентов и напомните о себе</p>
+            <strong>Подарки ко дню рождения</strong>
+            <p>Получайте специальные бонусы и приятные предложения в ваш праздник</p>
           </div>
         </li>
+
         <li>
           <span className="feature-icon feature-icon--green" aria-hidden="true">
             <svg viewBox="0 0 24 24" fill="none">
@@ -66,15 +71,15 @@ export function CustomerLanding() {
             </svg>
           </span>
           <div>
-            <strong>Программы лояльности</strong>
-            <p>Создавайте сразу несколько бонусных программ, работающих одновременно</p>
+            <strong>Персональные предложения</strong>
+            <p>Пользуйтесь акциями, скидками и бонусными программами</p>
           </div>
         </li>
       </ul>
 
       <div className="customer-landing__actions">
         <a className="button-link customer-landing__connect" href="/register">
-          Подключить
+          Зарегистрироваться
         </a>
         <a className="customer-landing__login" href="/login">
           Войти
