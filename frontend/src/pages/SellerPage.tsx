@@ -1,22 +1,34 @@
-import { FormEvent, useRef, useState } from "react";
+import { FormEvent, useEffect, useRef, useState } from "react";
+import { Html5Qrcode } from "html5-qrcode";
 
 import { api, idempotencyKey, points, SellerCustomer } from "../api/client";
 import { BottomNav, Card, ErrorMessage, Field, Layout } from "../components/Layout";
 
 type Action = "earn" | "redeem";
 
+const SCANNER_ID = "seller-qr-reader";
+
 export function SellerPage() {
   const [loggedIn, setLoggedIn] = useState(false);
   const [phone, setPhone] = useState("");
   const [password, setPassword] = useState("");
+  const [customerCode, setCustomerCode] = useState("");
   const [qrValue, setQrValue] = useState("");
   const [purchaseAmount, setPurchaseAmount] = useState("");
   const [redeemPoints, setRedeemPoints] = useState("");
   const [action, setAction] = useState<Action>("earn");
   const [customer, setCustomer] = useState<SellerCustomer | null>(null);
+  const [verifiedToken, setVerifiedToken] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const videoRef = useRef<HTMLVideoElement | null>(null);
+  const [scanning, setScanning] = useState(false);
+  const scannerRef = useRef<Html5Qrcode | null>(null);
+
+  useEffect(() => {
+    return () => {
+      void stopScan();
+    };
+  }, []);
 
   async function login(event: FormEvent) {
     event.preventDefault();
@@ -32,45 +44,65 @@ export function SellerPage() {
     }
   }
 
-  async function startScan() {
-    setError(null);
-    if (!videoRef.current) {
+  async function stopScan() {
+    const scanner = scannerRef.current;
+    if (!scanner) {
       return;
     }
-    if (!("BarcodeDetector" in window)) {
-      setError("Этот браузер не поддерживает сканер QR. Вставьте QR-значение вручную.");
+    scannerRef.current = null;
+    try {
+      if (scanner.isScanning) {
+        await scanner.stop();
+      }
+      scanner.clear();
+    } catch {
+      // Scanner may already be stopped.
+    }
+    setScanning(false);
+  }
+
+  async function startScan() {
+    setError(null);
+    if (scanning) {
+      await stopScan();
       return;
     }
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: "environment" },
-        audio: false
-      });
-      videoRef.current.srcObject = stream;
-      await videoRef.current.play();
-      const detector = new BarcodeDetector({ formats: ["qr_code"] });
-      const scan = async () => {
-        if (!videoRef.current) {
-          return;
-        }
-        const codes = await detector.detect(videoRef.current);
-        if (codes.length > 0) {
-          const value = codes[0].rawValue;
-          setQrValue(value);
-          void verify(value);
-          stream.getTracks().forEach((track) => track.stop());
-          return;
-        }
-        requestAnimationFrame(scan);
-      };
-      requestAnimationFrame(scan);
+      const scanner = new Html5Qrcode(SCANNER_ID);
+      scannerRef.current = scanner;
+      setScanning(true);
+      await scanner.start(
+        { facingMode: "environment" },
+        { fps: 10, qrbox: { width: 250, height: 250 } },
+        (decodedText) => {
+          setQrValue(decodedText);
+          void stopScan();
+          void verify(decodedText);
+        },
+        () => undefined
+      );
     } catch (err) {
+      setScanning(false);
+      scannerRef.current = null;
       setError("Не удалось открыть камеру. Проверьте HTTPS и разрешение камеры.");
     }
   }
 
-  async function verify(value = qrValue) {
+  function resolveInputValue(code = customerCode, qr = qrValue): string {
+    const digits = code.replace(/\D/g, "");
+    if (digits.length === 6) {
+      return digits;
+    }
+    return qr.trim();
+  }
+
+  async function verify(explicitValue?: string) {
     setError(null);
+    const value = explicitValue?.trim() || resolveInputValue();
+    if (value.length < 6) {
+      setError("Введите 6-значный код или отсканируйте QR");
+      return;
+    }
     try {
       const amountMinor = amountToMinor(purchaseAmount);
       const nextCustomer = await api<SellerCustomer>("/seller/qr/verify", {
@@ -81,8 +113,17 @@ export function SellerPage() {
         })
       });
       setCustomer(nextCustomer);
+      setVerifiedToken(value);
+      if (value.length === 6) {
+        setCustomerCode(value);
+        setQrValue("");
+      } else {
+        setQrValue(value);
+        setCustomerCode("");
+      }
     } catch (err) {
-      setError("QR-код не распознан или покупатель не найден");
+      setVerifiedToken(null);
+      setError(err instanceof Error ? err.message : "Код недействителен или истёк. Попросите покупателя обновить QR.");
     }
   }
 
@@ -91,22 +132,38 @@ export function SellerPage() {
     setError(null);
     setMessage(null);
     const amountMinor = amountToMinor(purchaseAmount);
-    if (!customer || !amountMinor) {
-      setError("Сначала отсканируйте QR и введите сумму");
+    const token = verifiedToken ?? resolveInputValue();
+    if (!customer || !verifiedToken || !amountMinor || token.length < 6) {
+      setError("Сначала проверьте покупателя и введите сумму");
       return;
     }
+    if (action === "redeem") {
+      const pointsToRedeem = Number(redeemPoints);
+      if (!Number.isFinite(pointsToRedeem) || pointsToRedeem < 1) {
+        setError("Укажите количество баллов для списания");
+        return;
+      }
+    }
     try {
+      const payload: {
+        customer_token: string;
+        purchase_amount_minor: number;
+        action: Action;
+        redeem_points?: number;
+      } = {
+        customer_token: token,
+        purchase_amount_minor: amountMinor,
+        action
+      };
+      if (action === "redeem") {
+        payload.redeem_points = Number(redeemPoints);
+      }
       const response = await api<{ transaction: { points_delta: number; balance_after: number } }>(
         "/seller/sales",
         {
           method: "POST",
           headers: { "Idempotency-Key": idempotencyKey("seller-sale") },
-          body: JSON.stringify({
-            customer_token: qrValue,
-            purchase_amount_minor: amountMinor,
-            action,
-            redeem_points: action === "redeem" ? Number(redeemPoints) : undefined
-          })
+          body: JSON.stringify(payload)
         }
       );
       setMessage(
@@ -114,9 +171,9 @@ export function SellerPage() {
           response.transaction.balance_after
         )}.`
       );
-      await verify(qrValue);
+      await verify(token);
     } catch (err) {
-      setError("Не удалось провести операцию");
+      setError(err instanceof Error ? err.message : "Не удалось провести операцию");
     }
   }
 
@@ -147,8 +204,13 @@ export function SellerPage() {
       <Layout title="Кабинет продавца" subtitle="Вход сотрудника">
         <Card>
           <form className="form" onSubmit={login}>
-            <Field label="Телефон">
-              <input value={phone} onChange={(event) => setPhone(event.target.value)} required />
+            <Field label="Телефон, имя или username">
+              <input
+                value={phone}
+                onChange={(event) => setPhone(event.target.value)}
+                autoComplete="username"
+                required
+              />
             </Field>
             <Field label="Пароль">
               <input
@@ -170,10 +232,20 @@ export function SellerPage() {
   return (
     <Layout title="Кабинет продавца" subtitle="Сканирование и продажа">
       <Card>
-        <video ref={videoRef} className="scanner" muted playsInline />
-        <button onClick={() => void startScan()}>Открыть камеру</button>
-        <Field label="QR-значение вручную">
-          <textarea value={qrValue} onChange={(event) => setQrValue(event.target.value)} />
+        <div id={SCANNER_ID} className="scanner" />
+        <button onClick={() => void startScan()}>{scanning ? "Закрыть камеру" : "Открыть камеру"}</button>
+        <Field label="Код покупателя (6 цифр)">
+          <input
+            value={customerCode}
+            onChange={(event) => setCustomerCode(event.target.value.replace(/\D/g, "").slice(0, 6))}
+            inputMode="numeric"
+            autoComplete="one-time-code"
+            placeholder="123456"
+            maxLength={6}
+          />
+        </Field>
+        <Field label="Или вставьте QR-значение">
+          <textarea value={qrValue} onChange={(event) => setQrValue(event.target.value)} rows={2} />
         </Field>
         <Field label="Сумма покупки">
           <input

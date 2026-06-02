@@ -1,7 +1,7 @@
 from datetime import date, datetime
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 
 class CustomerRegisterRequest(BaseModel):
@@ -9,6 +9,21 @@ class CustomerRegisterRequest(BaseModel):
     phone: str = Field(min_length=10, max_length=32)
     birth_date: date
     consent_accepted: bool
+    password: str | None = Field(default=None, min_length=8, max_length=128)
+
+
+class CustomerLoginRequest(BaseModel):
+    phone: str | None = Field(default=None, min_length=10, max_length=32)
+    password: str | None = Field(default=None, min_length=8, max_length=128)
+    access_code: str | None = Field(default=None, min_length=6, max_length=16)
+
+    @model_validator(mode="after")
+    def validate_login_method(self) -> "CustomerLoginRequest":
+        if self.access_code:
+            return self
+        if self.phone and self.password:
+            return self
+        raise ValueError("Provide phone and password or access code")
 
 
 class PhoneRequest(BaseModel):
@@ -20,7 +35,11 @@ class VerifyCodeRequest(PhoneRequest):
 
 
 class SellerLoginRequest(BaseModel):
-    phone: str = Field(min_length=10, max_length=32)
+    phone: str = Field(
+        min_length=2,
+        max_length=255,
+        description="Phone number, seller full name, or Telegram username",
+    )
     password: str = Field(min_length=8, max_length=128)
 
 
@@ -34,6 +53,10 @@ class SessionResponse(BaseModel):
     id: int
 
 
+class CustomerRegisterResponse(SessionResponse):
+    access_code: str | None = None
+
+
 class CustomerProfile(BaseModel):
     id: int
     full_name: str
@@ -41,6 +64,13 @@ class CustomerProfile(BaseModel):
     birth_date: date | None
     balance_points: int
     qr_token: str
+
+
+class CustomerQrResponse(BaseModel):
+    qr_token: str
+    short_code: str
+    expires_at: datetime
+    ttl_seconds: int
 
 
 class TransactionResponse(BaseModel):
@@ -63,15 +93,21 @@ class SellerCustomerResponse(BaseModel):
 
 
 class VerifyQrRequest(BaseModel):
-    qr_value: str = Field(min_length=8)
+    qr_value: str = Field(min_length=6)
     purchase_amount_minor: int | None = Field(default=None, gt=0)
 
 
 class SaleRequest(BaseModel):
-    customer_token: str = Field(min_length=8)
+    customer_token: str = Field(min_length=6)
     purchase_amount_minor: int = Field(gt=0)
     action: Literal["earn", "redeem"]
     redeem_points: int | None = Field(default=None, ge=1)
+
+    @model_validator(mode="after")
+    def validate_redeem_points(self) -> "SaleRequest":
+        if self.action == "redeem" and (self.redeem_points is None or self.redeem_points < 1):
+            raise ValueError("redeem_points is required for redeem action")
+        return self
 
 
 class SaleResponse(BaseModel):

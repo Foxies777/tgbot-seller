@@ -1,11 +1,11 @@
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Annotated
 from uuid import uuid4
 
 from fastapi import APIRouter, File, Header, HTTPException, Request, Response, UploadFile, status
 from PIL import Image, ImageOps
-from sqlalchemy import desc, select
+from sqlalchemy import desc, func, select
 from sqlalchemy.exc import IntegrityError
 
 from app.api.deps import (
@@ -18,6 +18,8 @@ from app.api.deps import (
     set_role_cookie,
 )
 from app.core.security import (
+    generate_customer_access_code,
+    hash_customer_access_code,
     hash_password,
     normalize_phone,
     random_idempotency_key,
@@ -38,8 +40,11 @@ from app.models import (
 from app.models.enums import SpecialOfferStatus, UserStatus
 from app.schemas.api import (
     AdminLoginRequest,
+    CustomerLoginRequest,
     CustomerProfile,
+    CustomerQrResponse,
     CustomerRegisterRequest,
+    CustomerRegisterResponse,
     ExpirePointsResponse,
     LoyaltySettingsResponse,
     LoyaltySettingsUpdate,
@@ -57,6 +62,7 @@ from app.schemas.api import (
     VerifyCodeRequest,
     VerifyQrRequest,
 )
+from app.services.customer_codes import issue_code, resolve_code
 from app.services.loyalty import InsufficientPointsError, LoyaltyService, RedeemDisabledError
 
 router = APIRouter(prefix="/api/v1")
@@ -65,7 +71,7 @@ OFFER_IMAGE_SIZE = (1080, 1080)
 OfferImageFile = Annotated[UploadFile, File(...)]
 
 
-@router.post("/auth/customer/register", response_model=SessionResponse)
+@router.post("/auth/customer/register", response_model=CustomerRegisterResponse)
 async def register_customer(
     payload: CustomerRegisterRequest,
     request: Request,
@@ -78,13 +84,29 @@ async def register_customer(
     phone_normalized = normalize_phone(payload.phone)
     result = await session.execute(select(User).where(User.phone_normalized == phone_normalized))
     user = result.scalar_one_or_none()
+    access_code: str | None = None
     if user is None:
+        for _ in range(10):
+            candidate = generate_customer_access_code()
+            code_hash = hash_customer_access_code(settings, candidate)
+            existing = await session.execute(
+                select(User.id).where(User.access_code_hash == code_hash)
+            )
+            if existing.scalar_one_or_none() is None:
+                access_code = candidate
+                break
+        if access_code is None:
+            raise HTTPException(
+                status.HTTP_500_INTERNAL_SERVER_ERROR,
+                "Could not generate access code",
+            )
         user = User(
             full_name=payload.full_name.strip(),
             phone=payload.phone,
             phone_normalized=phone_normalized,
             birth_date=payload.birth_date,
             balance_points=0,
+            access_code_hash=hash_customer_access_code(settings, access_code),
             status=UserStatus.active,
         )
         session.add(user)
@@ -93,6 +115,9 @@ async def register_customer(
         user.full_name = payload.full_name.strip()
         user.phone = payload.phone
         user.birth_date = payload.birth_date
+
+    if payload.password:
+        user.password_hash = hash_password(payload.password)
 
     session.add(
         Consent(
@@ -108,6 +133,35 @@ async def register_customer(
         idempotency_key=f"welcome:{user.id}",
     )
     await session.commit()
+    set_role_cookie(response, settings, role="customer", subject=user.id)
+    return CustomerRegisterResponse(role="customer", id=user.id, access_code=access_code)
+
+
+@router.post("/auth/customer/login", response_model=SessionResponse)
+async def customer_login(
+    payload: CustomerLoginRequest,
+    response: Response,
+    session: SessionDep,
+    settings: SettingsDep,
+):
+    user: User | None = None
+    if payload.access_code:
+        code_hash = hash_customer_access_code(settings, payload.access_code)
+        result = await session.execute(select(User).where(User.access_code_hash == code_hash))
+        user = result.scalar_one_or_none()
+    elif payload.phone and payload.password:
+        phone_normalized = normalize_phone(payload.phone)
+        result = await session.execute(
+            select(User).where(User.phone_normalized == phone_normalized)
+        )
+        user = result.scalar_one_or_none()
+        if user is None or user.password_hash is None or not verify_password(
+            payload.password, user.password_hash
+        ):
+            raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Invalid phone or password")
+
+    if user is None or user.status != UserStatus.active:
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Invalid credentials")
     set_role_cookie(response, settings, role="customer", subject=user.id)
     return SessionResponse(role="customer", id=user.id)
 
@@ -143,11 +197,7 @@ async def seller_login(
     session: SessionDep,
     settings: SettingsDep,
 ):
-    phone_normalized = normalize_phone(payload.phone)
-    result = await session.execute(
-        select(Seller).where(Seller.phone_normalized == phone_normalized)
-    )
-    seller = result.scalar_one_or_none()
+    seller = await _find_seller_for_login(session, payload.phone.strip())
     if (
         seller is None
         or not seller.is_active
@@ -192,6 +242,21 @@ async def customer_me(customer_id: CustomerIdDep, session: SessionDep, settings:
         birth_date=user.birth_date,
         balance_points=user.balance_points,
         qr_token=sign_qr_payload(settings, user.id),
+    )
+
+
+@router.get("/customer/me/qr", response_model=CustomerQrResponse)
+async def customer_qr(customer_id: CustomerIdDep, session: SessionDep, settings: SettingsDep):
+    user = await _get_active_user(session, customer_id)
+    ttl = settings.qr_ttl_seconds
+    qr_token = sign_qr_payload(settings, user.id)
+    short_code = issue_code(user.id, qr_token, ttl)
+    expires_at = datetime.now(UTC) + timedelta(seconds=ttl)
+    return CustomerQrResponse(
+        qr_token=qr_token,
+        short_code=short_code,
+        expires_at=expires_at,
+        ttl_seconds=ttl,
     )
 
 
@@ -433,6 +498,33 @@ async def expire_points(_admin_id: AdminIdDep, session: SessionDep, settings: Se
     return ExpirePointsResponse(expired_transactions=len(transactions))
 
 
+async def _find_seller_for_login(session: SessionDep, login: str) -> Seller | None:
+    digits = "".join(char for char in login if char.isdigit())
+    if len(digits) >= 10:
+        try:
+            phone_normalized = normalize_phone(login)
+        except ValueError:
+            phone_normalized = None
+        if phone_normalized is not None:
+            result = await session.execute(
+                select(Seller).where(Seller.phone_normalized == phone_normalized)
+            )
+            seller = result.scalar_one_or_none()
+            if seller is not None:
+                return seller
+
+    username = login.lstrip("@")
+    result = await session.execute(select(Seller).where(Seller.username == username))
+    seller = result.scalar_one_or_none()
+    if seller is not None:
+        return seller
+
+    result = await session.execute(
+        select(Seller).where(func.lower(Seller.full_name) == login.lower())
+    )
+    return result.scalar_one_or_none()
+
+
 async def _get_active_user(session: SessionDep, user_id: int) -> User:
     user = await session.get(User, user_id)
     if user is None or user.status != UserStatus.active:
@@ -448,10 +540,23 @@ async def _get_active_seller(session: SessionDep, seller_id: int) -> Seller:
 
 
 async def _user_from_qr_value(session: SessionDep, settings: SettingsDep, qr_value: str) -> User:
-    token = _extract_qr_token(qr_value)
-    user_id = verify_qr_payload(settings, token)
+    stripped = qr_value.strip()
+    ttl = settings.qr_ttl_seconds
+
+    if stripped.isdigit() and len(stripped) == 6:
+        resolved = resolve_code(stripped)
+        if resolved is None:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "Invalid or expired code")
+        user_id, qr_token = resolved
+        verified_id = verify_qr_payload(settings, qr_token, ttl)
+        if verified_id != user_id:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "Invalid QR code")
+        return await _get_active_user(session, user_id)
+
+    token = _extract_qr_token(stripped)
+    user_id = verify_qr_payload(settings, token, ttl)
     if user_id is None:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Invalid QR code")
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Invalid or expired QR code")
     return await _get_active_user(session, user_id)
 
 

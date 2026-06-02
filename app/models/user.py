@@ -18,6 +18,8 @@ class User(TimestampMixin, Base):
     phone_normalized: Mapped[str | None] = mapped_column(String(32), unique=True, index=True)
     birth_date: Mapped[date | None] = mapped_column(Date)
     balance_points: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    password_hash: Mapped[str | None] = mapped_column(String(255))
+    access_code_hash: Mapped[str | None] = mapped_column(String(64), unique=True, index=True)
     status: Mapped[UserStatus] = mapped_column(
         String(32),
         default=UserStatus.active,

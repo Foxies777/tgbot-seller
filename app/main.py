@@ -9,6 +9,7 @@ from app.api import router as api_router
 from app.bot.dispatcher import create_bot, create_dispatcher
 from app.bot.routes import router as telegram_router
 from app.core.config import get_settings
+from app.db.migrate import run_migrations
 from app.jobs import run_expiration_loop, stop_task
 from app.pwa import router as pwa_router
 from app.web.routes import router as web_router
@@ -17,6 +18,7 @@ from app.web.routes import router as web_router
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     settings = get_settings()
+    await asyncio.to_thread(run_migrations)
     bot = create_bot(settings)
     dispatcher = create_dispatcher(settings)
     app.state.settings = settings

@@ -7,6 +7,7 @@ router = APIRouter()
 
 PWA_INDEX = Path("app/static/pwa/index.html")
 PWA_SERVICE_WORKER = Path("app/static/pwa/sw.js")
+PWA_MANIFEST = Path("app/static/pwa/manifest.webmanifest")
 
 
 @router.get("/")
@@ -16,6 +17,7 @@ async def root():
 
 @router.get("/app")
 @router.get("/register")
+@router.get("/login")
 @router.get("/seller")
 @router.get("/admin")
 @router.get("/qr/{token}")
@@ -27,6 +29,13 @@ async def pwa_index():
         "<p>Frontend build is not available. Run the Vite dev server from frontend/.</p>",
         status_code=503,
     )
+
+
+@router.get("/manifest.webmanifest")
+async def manifest():
+    if PWA_MANIFEST.exists():
+        return FileResponse(PWA_MANIFEST, media_type="application/manifest+json")
+    return HTMLResponse("", status_code=404)
 
 
 @router.get("/sw.js")

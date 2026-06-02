@@ -2,6 +2,7 @@ import { FormEvent, useEffect, useState } from "react";
 
 import {
   api,
+  datetimeLocalToUtc,
   LoyaltySettings,
   moneyFromMinor,
   SpecialOffer,
@@ -123,8 +124,8 @@ export function AdminPage() {
           title: data.get("title"),
           text: data.get("text"),
           image_path: imagePath,
-          starts_at: data.get("starts_at"),
-          ends_at: data.get("ends_at"),
+          starts_at: datetimeLocalToUtc(data.get("starts_at")),
+          ends_at: datetimeLocalToUtc(data.get("ends_at")),
           status: data.get("status")
         })
       });

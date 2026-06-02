@@ -1,7 +1,10 @@
 import base64
+import secrets
+import string
 from datetime import UTC, datetime, timedelta
 from hashlib import pbkdf2_hmac, sha256
 from hmac import compare_digest
+from hmac import new as hmac_new
 from secrets import token_bytes, token_urlsafe
 from typing import Any
 
@@ -129,3 +132,22 @@ def normalize_phone(phone: str) -> str:
     if len(digits) < 10:
         raise ValueError("phone must contain at least 10 digits")
     return f"+{digits}"
+
+
+_CUSTOMER_ACCESS_CODE_ALPHABET = string.ascii_uppercase + string.digits
+for _char in ("O", "0", "I", "1"):
+    _CUSTOMER_ACCESS_CODE_ALPHABET = _CUSTOMER_ACCESS_CODE_ALPHABET.replace(_char, "")
+
+
+def generate_customer_access_code(length: int = 8) -> str:
+    return "".join(secrets.choice(_CUSTOMER_ACCESS_CODE_ALPHABET) for _ in range(length))
+
+
+def hash_customer_access_code(settings: Settings, code: str) -> str:
+    normalized = code.strip().upper().replace("-", "").replace(" ", "")
+    digest = hmac_new(
+        settings.secret_key.get_secret_value().encode("utf-8"),
+        normalized.encode("utf-8"),
+        sha256,
+    ).hexdigest()
+    return digest

@@ -1,5 +1,11 @@
 export type Role = "customer" | "seller" | "admin";
 
+export type CustomerRegisterResponse = {
+  role: Role;
+  id: number;
+  access_code: string | null;
+};
+
 export type CustomerProfile = {
   id: number;
   full_name: string;
@@ -7,6 +13,13 @@ export type CustomerProfile = {
   birth_date: string | null;
   balance_points: number;
   qr_token: string;
+};
+
+export type CustomerQr = {
+  qr_token: string;
+  short_code: string;
+  expires_at: string;
+  ttl_seconds: number;
 };
 
 export type Transaction = {
@@ -49,6 +62,16 @@ export type SpecialOffer = {
 
 const API_BASE = "/api/v1";
 
+export class ApiError extends Error {
+  status: number;
+
+  constructor(message: string, status: number) {
+    super(message);
+    this.name = "ApiError";
+    this.status = status;
+  }
+}
+
 export async function api<T>(path: string, options: RequestInit = {}): Promise<T> {
   const response = await fetch(`${API_BASE}${path}`, {
     credentials: "include",
@@ -60,12 +83,37 @@ export async function api<T>(path: string, options: RequestInit = {}): Promise<T
   });
   if (!response.ok) {
     const text = await response.text();
-    throw new Error(text || `Request failed: ${response.status}`);
+    throw new ApiError(formatApiError(text, response.status), response.status);
   }
   if (response.status === 204) {
     return undefined as T;
   }
   return (await response.json()) as T;
+}
+
+function formatApiError(text: string, status: number): string {
+  try {
+    const payload = JSON.parse(text) as { detail?: unknown };
+    if (Array.isArray(payload.detail)) {
+      const messages = payload.detail
+        .map((item) => {
+          if (typeof item === "object" && item !== null && "msg" in item) {
+            return String((item as { msg: string }).msg);
+          }
+          return null;
+        })
+        .filter(Boolean);
+      if (messages.length > 0) {
+        return messages.join(". ");
+      }
+    }
+    if (typeof payload.detail === "string") {
+      return payload.detail;
+    }
+  } catch {
+    // Keep raw response text below.
+  }
+  return text || `Request failed: ${status}`;
 }
 
 export function moneyFromMinor(value: number): string {
@@ -81,4 +129,16 @@ export function points(value: number): string {
 
 export function idempotencyKey(prefix: string): string {
   return `${prefix}:${crypto.randomUUID()}`;
+}
+
+/** Converts `<input type="datetime-local">` value to UTC ISO string for the API. */
+export function datetimeLocalToUtc(value: FormDataEntryValue | null): string {
+  if (typeof value !== "string" || !value) {
+    throw new Error("Invalid datetime");
+  }
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) {
+    throw new Error("Invalid datetime");
+  }
+  return parsed.toISOString();
 }

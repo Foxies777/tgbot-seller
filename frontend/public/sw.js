@@ -1,5 +1,14 @@
 const CACHE_NAME = "bonus-loyalty-shell-v1";
-const SHELL_ASSETS = ["/", "/app", "/register", "/seller", "/admin", "/manifest.webmanifest"];
+const SHELL_ASSETS = [
+  "/",
+  "/app",
+  "/register",
+  "/login",
+  "/seller",
+  "/admin",
+  "/manifest.webmanifest",
+  "/static/pwa/manifest.webmanifest"
+];
 
 self.addEventListener("install", (event) => {
   event.waitUntil(caches.open(CACHE_NAME).then((cache) => cache.addAll(SHELL_ASSETS)));

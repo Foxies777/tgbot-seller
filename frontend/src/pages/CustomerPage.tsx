@@ -1,37 +1,87 @@
 import QRCode from "qrcode";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import {
   api,
+  ApiError,
   CustomerProfile,
+  CustomerQr,
   moneyFromMinor,
   points,
   SpecialOffer,
   Transaction
 } from "../api/client";
+import { CustomerLanding } from "../components/CustomerLanding";
 import { BottomNav, Card, ErrorMessage, Layout } from "../components/Layout";
 
 export function CustomerPage() {
   const [profile, setProfile] = useState<CustomerProfile | null>(null);
+  const [qrData, setQrData] = useState<CustomerQr | null>(null);
+  const [secondsLeft, setSecondsLeft] = useState(0);
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [offers, setOffers] = useState<SpecialOffer[]>([]);
   const [tab, setTab] = useState<"card" | "history">("card");
   const [error, setError] = useState<string | null>(null);
+  const [unauthenticated, setUnauthenticated] = useState(false);
+  const [loading, setLoading] = useState(true);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
+
+  const refreshQr = useCallback(async () => {
+    try {
+      const nextQr = await api<CustomerQr>("/customer/me/qr");
+      setQrData(nextQr);
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 401) {
+        setUnauthenticated(true);
+      } else {
+        setError(err instanceof Error ? err.message : "Не удалось загрузить QR-код");
+      }
+    }
+  }, []);
 
   useEffect(() => {
     void load();
   }, []);
 
   useEffect(() => {
-    if (!profile || !canvasRef.current) {
+    if (tab !== "card" || !profile) {
       return;
     }
-    const value = `${window.location.origin}/qr/${profile.qr_token}`;
+    void refreshQr();
+    const interval = window.setInterval(() => {
+      void refreshQr();
+    }, (qrData?.ttl_seconds ?? 60) * 1000);
+    return () => window.clearInterval(interval);
+  }, [profile, tab, refreshQr, qrData?.ttl_seconds]);
+
+  useEffect(() => {
+    if (!qrData) {
+      return;
+    }
+    const tick = () => {
+      const remaining = Math.max(
+        0,
+        Math.ceil((new Date(qrData.expires_at).getTime() - Date.now()) / 1000)
+      );
+      setSecondsLeft(remaining);
+    };
+    tick();
+    const interval = window.setInterval(tick, 1000);
+    return () => window.clearInterval(interval);
+  }, [qrData]);
+
+  useEffect(() => {
+    if (!qrData || tab !== "card" || !canvasRef.current) {
+      return;
+    }
+    const value = `${window.location.origin}/qr/${qrData.qr_token}`;
     void QRCode.toCanvas(canvasRef.current, value, { width: 240, margin: 2 });
-  }, [profile]);
+  }, [qrData, tab]);
 
   async function load() {
+    setLoading(true);
+    setError(null);
+    setUnauthenticated(false);
     try {
       const [nextProfile, nextTransactions, nextOffers] = await Promise.all([
         api<CustomerProfile>("/customer/me"),
@@ -42,7 +92,13 @@ export function CustomerPage() {
       setTransactions(nextTransactions);
       setOffers(nextOffers);
     } catch (err) {
-      setError("Войдите или зарегистрируйтесь, чтобы открыть кабинет");
+      if (err instanceof ApiError && err.status === 401) {
+        setUnauthenticated(true);
+      } else {
+        setError(err instanceof Error ? err.message : "Не удалось загрузить кабинет");
+      }
+    } finally {
+      setLoading(false);
     }
   }
 
@@ -51,14 +107,28 @@ export function CustomerPage() {
     setOffers((current) => current.filter((offer) => offer.id !== id));
   }
 
+  if (loading) {
+    return (
+      <Layout title="Кабинет покупателя">
+        <Card>
+          <p className="muted">Загрузка...</p>
+        </Card>
+      </Layout>
+    );
+  }
+
+  if (unauthenticated) {
+    return <CustomerLanding />;
+  }
+
   if (error) {
     return (
       <Layout title="Кабинет покупателя">
         <Card>
           <ErrorMessage message={error} />
-          <a className="button-link" href="/register">
-            Зарегистрироваться
-          </a>
+          <button type="button" onClick={() => void load()}>
+            Повторить
+          </button>
         </Card>
         <BottomNav />
       </Layout>
@@ -80,10 +150,21 @@ export function CustomerPage() {
         <Card tone="dark">
           <p className="muted-light">Ваш баланс</p>
           <strong className="balance">{profile ? points(profile.balance_points) : "..."}</strong>
-          <p>Покажите QR продавцу для начисления или списания бонусов.</p>
+          <p>Покажите QR или назовите код продавцу для начисления или списания бонусов.</p>
           <div className="qr-box">
             <canvas ref={canvasRef} />
           </div>
+          {qrData ? (
+            <>
+              <p className="customer-code-label">Код для продавца</p>
+              <strong className="customer-code">{qrData.short_code}</strong>
+              <p className="muted-light qr-expiry">
+                {secondsLeft > 0
+                  ? `Обновится через ${secondsLeft} сек.`
+                  : "Обновление кода..."}
+              </p>
+            </>
+          ) : null}
         </Card>
       ) : (
         <Card>

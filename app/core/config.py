@@ -30,6 +30,7 @@ class Settings(BaseSettings):
     max_redeem_percent: int = Field(default=50, ge=0, le=100)
     point_ttl_days: int = Field(default=365, ge=1)
     session_ttl_hours: int = Field(default=24 * 30, ge=1)
+    qr_ttl_seconds: int = Field(default=60, ge=30, le=300)
 
     @property
     def webhook_url(self) -> str:

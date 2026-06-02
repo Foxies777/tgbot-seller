@@ -1,14 +1,61 @@
 services:
+
   app:
     build: .
     env_file: .env
     depends_on:
-      - db
+      db:
+        condition: service_healthy
     ports:
       - "8000:8000"
-    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+    entrypoint: ["python", "/app/scripts/docker_entrypoint.py"]
+    command:
+      - uvicorn
+      - app.main:app
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8000"
+      - --reload
     volumes:
       - .:/app
+
+  nginx:
+    image: nginx:1.27-alpine
+    depends_on:
+      cert-init:
+        condition: service_completed_successfully
+      app:
+        condition: service_started
+    ports:
+      - "8443:443"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./certs:/etc/nginx/certs:ro
+
+
+  cert-init:
+    image: alpine/openssl:3.5.4
+    volumes:
+      - ./certs:/certs
+      - ./scripts/generate_ssl_cert.sh:/generate.sh:ro
+    environment:
+      CERT_EXTRA_IP: ${CERT_EXTRA_IP:-}
+      CERT_DAYS: ${CERT_DAYS:-825}
+    entrypoint: ["/bin/sh", "/generate.sh"]
+    restart: "no"
+
+  certgen:
+    profiles: [tools]
+    image: alpine/openssl:3.5.4
+    volumes:
+      - ./certs:/certs
+      - ./scripts/generate_ssl_cert.sh:/generate.sh:ro
+    environment:
+      CERT_EXTRA_IP: ${CERT_EXTRA_IP:-}
+      CERT_DAYS: ${CERT_DAYS:-825}
+      FORCE_CERT: "1"
+    entrypoint: ["/bin/sh", "/generate.sh"]
 
   db:
     image: postgres:18
@@ -20,6 +67,12 @@ services:
       - "54322:5432"
     volumes:
       - postgres_data:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U loyalty -d loyalty"]
+      interval: 2s
+      timeout: 5s
+      retries: 10
 
 volumes:
   postgres_data:
+

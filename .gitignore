@@ -43,6 +43,8 @@ app/static/pwa/
 
 # Docker and local services
 postgres_data/
+certs/*.pem
+certs/openssl.cnf
 *.pid
 
 # IDE and OS files
