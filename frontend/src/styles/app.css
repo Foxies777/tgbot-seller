@@ -307,7 +307,7 @@ p {
   transform: translateX(-50%);
   z-index: 10;
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: repeat(2, 1fr);
   gap: 6px;
   width: min(calc(100% - 24px), 520px);
   padding: 8px;
@@ -326,6 +326,11 @@ p {
   padding: 12px 8px;
   text-align: center;
   text-decoration: none;
+}
+
+.bottom-nav a.active {
+  background: #eff4ff;
+  color: #175cd3;
 }
 
 @media (min-width: 800px) {

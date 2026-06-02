@@ -8,7 +8,7 @@ import {
   SpecialOffer,
   Transaction
 } from "../api/client";
-import { BottomNav, Card, ErrorMessage, Field, Layout } from "../components/Layout";
+import { Card, ErrorMessage, Field, Layout, StaffNav } from "../components/Layout";
 
 export function AdminPage() {
   const [loggedIn, setLoggedIn] = useState(false);
@@ -160,7 +160,7 @@ export function AdminPage() {
             <button>Войти</button>
           </form>
         </Card>
-        <BottomNav />
+        <StaffNav />
       </Layout>
     );
   }
@@ -292,7 +292,7 @@ export function AdminPage() {
           ))}
         </div>
       </Card>
-      <BottomNav />
+      <StaffNav />
     </Layout>
   );
 }

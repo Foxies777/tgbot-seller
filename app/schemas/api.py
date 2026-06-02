@@ -100,18 +100,28 @@ class VerifyQrRequest(BaseModel):
 class SaleRequest(BaseModel):
     customer_token: str = Field(min_length=6)
     purchase_amount_minor: int = Field(gt=0)
-    action: Literal["earn", "redeem"]
-    redeem_points: int | None = Field(default=None, ge=1)
+    redeem_points: int | None = Field(default=None, ge=0)
+    action: Literal["earn", "redeem"] | None = Field(
+        default=None,
+        description="Deprecated. Sales always earn on amount after redeem.",
+    )
 
     @model_validator(mode="after")
-    def validate_redeem_points(self) -> "SaleRequest":
+    def validate_legacy_action(self) -> "SaleRequest":
         if self.action == "redeem" and (self.redeem_points is None or self.redeem_points < 1):
             raise ValueError("redeem_points is required for redeem action")
         return self
 
+    def resolved_redeem_points(self) -> int:
+        if self.action == "earn":
+            return 0
+        return self.redeem_points or 0
+
 
 class SaleResponse(BaseModel):
     transaction: TransactionResponse
+    earned_points: int = 0
+    redeemed_points: int = 0
     is_duplicate: bool
 
 

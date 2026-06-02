@@ -3,7 +3,7 @@ from decimal import Decimal, InvalidOperation
 from aiogram import F, Router
 from aiogram.filters import Command, CommandObject
 from aiogram.fsm.context import FSMContext
-from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
+from aiogram.types import Message
 from sqlalchemy import select
 
 from app.bot.helpers import (
@@ -14,14 +14,10 @@ from app.bot.helpers import (
 )
 from app.bot.states import SaleFlow
 from app.core.config import Settings
-from app.core.security import (
-    generate_idempotency_key,
-    random_idempotency_key,
-    verify_qr_payload,
-)
+from app.core.security import generate_idempotency_key, verify_qr_payload
 from app.db.session import async_session_factory
 from app.models import User
-from app.services.loyalty import InsufficientPointsError, LoyaltyService
+from app.services.loyalty import InsufficientPointsError, LoyaltyService, RedeemDisabledError
 
 router = Router()
 
@@ -85,67 +81,24 @@ async def sale_amount(message: Message, state: FSMContext) -> None:
         return
 
     await state.update_data(amount_minor=amount_minor)
-    keyboard = InlineKeyboardMarkup(
-        inline_keyboard=[
-            [
-                InlineKeyboardButton(text="Начислить", callback_data="sale:earn"),
-                InlineKeyboardButton(text="Списать", callback_data="sale:redeem"),
-            ]
-        ]
-    )
-    await state.set_state(SaleFlow.waiting_action)
-    await message.answer("Выберите действие:", reply_markup=keyboard)
-
-
-@router.callback_query(SaleFlow.waiting_action, F.data == "sale:earn")
-async def earn_action(callback: CallbackQuery, state: FSMContext, settings: Settings) -> None:
-    if callback.from_user is None:
-        return
-    data = await state.get_data()
-    async with async_session_factory() as session:
-        seller = await get_or_create_seller(session, settings, callback.from_user)
-        if seller is None:
-            await callback.message.answer("У вас нет прав продавца.")  # type: ignore[union-attr]
-            return
-        service = LoyaltyService(session, settings)
-        result = await service.earn_points(
-            user_id=int(data["customer_id"]),
-            seller_id=seller.id,
-            purchase_amount_minor=int(data["amount_minor"]),
-            idempotency_key=random_idempotency_key("sale"),
-        )
-        user = await session.get(User, int(data["customer_id"]))
-        await session.commit()
-
-    await state.clear()
-    await callback.message.answer(  # type: ignore[union-attr]
-        f"Начислено {result.transaction.points_delta} баллов. "
-        f"Новый баланс: {result.transaction.balance_after}."
-    )
-    if user is not None:
-        await callback.bot.send_message(
-            user.telegram_id,
-            f"Покупка обработана. Начислено {result.transaction.points_delta} баллов. "
-            f"Баланс: {result.transaction.balance_after}.",
-        )
-    await callback.answer()
-
-
-@router.callback_query(SaleFlow.waiting_action, F.data == "sale:redeem")
-async def redeem_action(callback: CallbackQuery, state: FSMContext) -> None:
     await state.set_state(SaleFlow.waiting_redeem_points)
-    await callback.message.answer("Сколько баллов списать?")  # type: ignore[union-attr]
-    await callback.answer()
+    await message.answer(
+        "Сколько баллов списать? Отправьте 0, если списание не нужно.\n"
+        "Бонусы начислятся автоматически с суммы после списания."
+    )
 
 
 @router.message(SaleFlow.waiting_redeem_points)
-async def redeem_points(message: Message, state: FSMContext, settings: Settings) -> None:
+async def complete_sale(message: Message, state: FSMContext, settings: Settings) -> None:
     if message.from_user is None:
         return
     try:
         requested_points = int((message.text or "").strip())
     except ValueError:
-        await message.answer("Введите количество баллов целым числом.")
+        await message.answer("Введите количество баллов целым числом (0 — без списания).")
+        return
+    if requested_points < 0:
+        await message.answer("Количество баллов не может быть отрицательным.")
         return
 
     data = await state.get_data()
@@ -156,13 +109,13 @@ async def redeem_points(message: Message, state: FSMContext, settings: Settings)
             return
         service = LoyaltyService(session, settings)
         try:
-            result = await service.redeem_points(
+            result = await service.process_purchase(
                 user_id=int(data["customer_id"]),
                 seller_id=seller.id,
                 purchase_amount_minor=int(data["amount_minor"]),
-                requested_points=requested_points,
+                redeem_points=requested_points,
                 idempotency_key=generate_idempotency_key(
-                    "redeem",
+                    "purchase",
                     seller.telegram_id,
                     data["customer_id"],
                     data["amount_minor"],
@@ -173,19 +126,29 @@ async def redeem_points(message: Message, state: FSMContext, settings: Settings)
             await session.rollback()
             await message.answer("Недостаточно баллов для списания.")
             return
+        except RedeemDisabledError:
+            await session.rollback()
+            await message.answer("Списание баллов отключено.")
+            return
         user = await session.get(User, int(data["customer_id"]))
         await session.commit()
 
+    redeemed = abs(result.redeem_transaction.points_delta) if result.redeem_transaction else 0
+    earned = result.earn_transaction.points_delta if result.earn_transaction else 0
+    balance_after = result.primary_transaction.balance_after
+
     await state.clear()
-    await message.answer(
-        f"Списано {abs(result.transaction.points_delta)} баллов. "
-        f"Новый баланс: {result.transaction.balance_after}."
-    )
+    parts: list[str] = []
+    if redeemed > 0:
+        parts.append(f"списано {redeemed}")
+    if earned > 0:
+        parts.append(f"начислено {earned}")
+    summary = ", ".join(parts) if parts else "операция выполнена"
+    await message.answer(f"Покупка проведена: {summary}. Новый баланс: {balance_after}.")
     if user is not None:
         await message.bot.send_message(
             user.telegram_id,
-            f"Покупка обработана. Списано {abs(result.transaction.points_delta)} баллов. "
-            f"Баланс: {result.transaction.balance_after}.",
+            f"Покупка обработана: {summary}. Баланс: {balance_after}.",
         )
 
 

@@ -12,7 +12,7 @@ import {
   Transaction
 } from "../api/client";
 import { CustomerLanding } from "../components/CustomerLanding";
-import { BottomNav, Card, ErrorMessage, Layout } from "../components/Layout";
+import { Card, ErrorMessage, Layout } from "../components/Layout";
 
 export function CustomerPage() {
   const [profile, setProfile] = useState<CustomerProfile | null>(null);
@@ -31,7 +31,7 @@ export function CustomerPage() {
       const nextQr = await api<CustomerQr>("/customer/me/qr");
       setQrData(nextQr);
     } catch (err) {
-      if (err instanceof ApiError && err.status === 401) {
+      if (err instanceof ApiError && (err.status === 401 || err.status === 403)) {
         setUnauthenticated(true);
       } else {
         setError(err instanceof Error ? err.message : "Не удалось загрузить QR-код");
@@ -92,7 +92,7 @@ export function CustomerPage() {
       setTransactions(nextTransactions);
       setOffers(nextOffers);
     } catch (err) {
-      if (err instanceof ApiError && err.status === 401) {
+      if (err instanceof ApiError && (err.status === 401 || err.status === 403)) {
         setUnauthenticated(true);
       } else {
         setError(err instanceof Error ? err.message : "Не удалось загрузить кабинет");
@@ -130,7 +130,6 @@ export function CustomerPage() {
             Повторить
           </button>
         </Card>
-        <BottomNav />
       </Layout>
     );
   }
@@ -188,7 +187,6 @@ export function CustomerPage() {
           </div>
         </Card>
       )}
-      <BottomNav />
     </Layout>
   );
 }

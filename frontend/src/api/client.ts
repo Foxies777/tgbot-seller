@@ -73,13 +73,14 @@ export class ApiError extends Error {
 }
 
 export async function api<T>(path: string, options: RequestInit = {}): Promise<T> {
+  const { headers: extraHeaders, ...rest } = options;
   const response = await fetch(`${API_BASE}${path}`, {
     credentials: "include",
+    ...rest,
     headers: {
       "Content-Type": "application/json",
-      ...options.headers
-    },
-    ...options
+      ...(extraHeaders ?? {})
+    }
   });
   if (!response.ok) {
     const text = await response.text();

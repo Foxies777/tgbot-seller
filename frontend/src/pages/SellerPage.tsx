@@ -2,9 +2,7 @@ import { FormEvent, useEffect, useRef, useState } from "react";
 import { Html5Qrcode } from "html5-qrcode";
 
 import { api, idempotencyKey, points, SellerCustomer } from "../api/client";
-import { BottomNav, Card, ErrorMessage, Field, Layout } from "../components/Layout";
-
-type Action = "earn" | "redeem";
+import { Card, ErrorMessage, Field, Layout, StaffNav } from "../components/Layout";
 
 const SCANNER_ID = "seller-qr-reader";
 
@@ -16,7 +14,6 @@ export function SellerPage() {
   const [qrValue, setQrValue] = useState("");
   const [purchaseAmount, setPurchaseAmount] = useState("");
   const [redeemPoints, setRedeemPoints] = useState("");
-  const [action, setAction] = useState<Action>("earn");
   const [customer, setCustomer] = useState<SellerCustomer | null>(null);
   const [verifiedToken, setVerifiedToken] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
@@ -137,40 +134,49 @@ export function SellerPage() {
       setError("Сначала проверьте покупателя и введите сумму");
       return;
     }
-    if (action === "redeem") {
-      const pointsToRedeem = Number(redeemPoints);
+    const redeemRaw = redeemPoints.trim();
+    let redeemToSend: number | undefined;
+    if (redeemRaw) {
+      const pointsToRedeem = Number(redeemRaw);
       if (!Number.isFinite(pointsToRedeem) || pointsToRedeem < 1) {
-        setError("Укажите количество баллов для списания");
+        setError("Укажите корректное количество баллов для списания");
         return;
       }
+      redeemToSend = pointsToRedeem;
     }
     try {
       const payload: {
         customer_token: string;
         purchase_amount_minor: number;
-        action: Action;
         redeem_points?: number;
       } = {
         customer_token: token,
-        purchase_amount_minor: amountMinor,
-        action
+        purchase_amount_minor: amountMinor
       };
-      if (action === "redeem") {
-        payload.redeem_points = Number(redeemPoints);
+      if (redeemToSend !== undefined) {
+        payload.redeem_points = redeemToSend;
       }
-      const response = await api<{ transaction: { points_delta: number; balance_after: number } }>(
-        "/seller/sales",
-        {
-          method: "POST",
-          headers: { "Idempotency-Key": idempotencyKey("seller-sale") },
-          body: JSON.stringify(payload)
-        }
-      );
+      const response = await api<{
+        transaction: { balance_after: number };
+        earned_points: number;
+        redeemed_points: number;
+      }>("/seller/sales", {
+        method: "POST",
+        headers: { "Idempotency-Key": idempotencyKey("seller-sale") },
+        body: JSON.stringify(payload)
+      });
+      const parts: string[] = [];
+      if (response.redeemed_points > 0) {
+        parts.push(`списано ${points(response.redeemed_points)}`);
+      }
+      if (response.earned_points > 0) {
+        parts.push(`начислено ${points(response.earned_points)}`);
+      }
+      const summary = parts.length > 0 ? parts.join(", ") : "операция выполнена";
       setMessage(
-        `Операция выполнена: ${points(response.transaction.points_delta)} баллов. Баланс: ${points(
-          response.transaction.balance_after
-        )}.`
+        `Покупка проведена: ${summary}. Баланс: ${points(response.transaction.balance_after)}.`
       );
+      setRedeemPoints("");
       await verify(token);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Не удалось провести операцию");
@@ -224,7 +230,7 @@ export function SellerPage() {
             <button>Войти</button>
           </form>
         </Card>
-        <BottomNav />
+        <StaffNav />
       </Layout>
     );
   }
@@ -271,30 +277,20 @@ export function SellerPage() {
 
       <Card>
         <form className="form" onSubmit={sale}>
-          <div className="segmented">
-            <button type="button" className={action === "earn" ? "active" : ""} onClick={() => setAction("earn")}>
-              Начислить
-            </button>
-            <button
-              type="button"
-              className={action === "redeem" ? "active" : ""}
-              onClick={() => setAction("redeem")}
-            >
-              Списать
-            </button>
-          </div>
-          {action === "redeem" ? (
-            <Field label="Баллы к списанию">
-              <input
-                value={redeemPoints}
-                onChange={(event) => setRedeemPoints(event.target.value)}
-                inputMode="numeric"
-              />
-            </Field>
-          ) : null}
+          <p>
+            Бонусы начисляются автоматически с суммы покупки после вычета списанных баллов.
+          </p>
+          <Field label="Баллы к списанию (необязательно)">
+            <input
+              value={redeemPoints}
+              onChange={(event) => setRedeemPoints(event.target.value)}
+              inputMode="numeric"
+              placeholder="0"
+            />
+          </Field>
           <ErrorMessage message={error} />
           {message ? <p className="success">{message}</p> : null}
-          <button>Провести операцию</button>
+          <button>Провести покупку</button>
         </form>
       </Card>
 
@@ -317,7 +313,7 @@ export function SellerPage() {
           <button>Зарегистрировать</button>
         </form>
       </Card>
-      <BottomNav />
+      <StaffNav />
     </Layout>
   );
 }

@@ -27,6 +27,21 @@ class LoyaltyResult:
     is_duplicate: bool = False
 
 
+@dataclass(frozen=True)
+class PurchaseResult:
+    earn_transaction: Transaction | None
+    redeem_transaction: Transaction | None
+    is_duplicate: bool = False
+
+    @property
+    def primary_transaction(self) -> Transaction:
+        if self.earn_transaction is not None:
+            return self.earn_transaction
+        if self.redeem_transaction is not None:
+            return self.redeem_transaction
+        raise RuntimeError("purchase produced no transactions")
+
+
 class LoyaltyService:
     def __init__(self, session: AsyncSession, settings: Settings):
         self.session = session
@@ -77,6 +92,76 @@ class LoyaltyService:
         if purchase_amount_minor <= 0:
             raise ValueError("purchase_amount_minor must be positive")
         return purchase_amount_minor * max_redeem_percent // 10_000
+
+    @staticmethod
+    def earn_amount_after_redeem(purchase_amount_minor: int, redeemed_points: int) -> int:
+        return max(0, purchase_amount_minor - redeemed_points)
+
+    async def process_purchase(
+        self,
+        *,
+        user_id: int,
+        seller_id: int | None,
+        purchase_amount_minor: int,
+        redeem_points: int,
+        idempotency_key: str,
+    ) -> PurchaseResult:
+        earn_key = f"{idempotency_key}:earn"
+        redeem_key = f"{idempotency_key}:redeem"
+
+        duplicate_earn = await self._get_duplicate(earn_key)
+        if duplicate_earn is not None:
+            duplicate_redeem = await self._get_duplicate(redeem_key)
+            return PurchaseResult(
+                earn_transaction=duplicate_earn,
+                redeem_transaction=duplicate_redeem,
+                is_duplicate=True,
+            )
+
+        redeem_transaction: Transaction | None = None
+        redeemed_points = 0
+        if redeem_points > 0:
+            redeem_result = await self.redeem_points(
+                user_id=user_id,
+                seller_id=seller_id,
+                purchase_amount_minor=purchase_amount_minor,
+                requested_points=redeem_points,
+                idempotency_key=redeem_key,
+            )
+            redeem_transaction = redeem_result.transaction
+            redeemed_points = abs(redeem_result.transaction.points_delta)
+            if redeem_result.is_duplicate:
+                duplicate_earn = await self._get_duplicate(earn_key)
+                return PurchaseResult(
+                    earn_transaction=duplicate_earn,
+                    redeem_transaction=redeem_transaction,
+                    is_duplicate=True,
+                )
+
+        earn_transaction: Transaction | None = None
+        earn_amount = self.earn_amount_after_redeem(purchase_amount_minor, redeemed_points)
+        if earn_amount > 0:
+            earn_result = await self.earn_points(
+                user_id=user_id,
+                seller_id=seller_id,
+                purchase_amount_minor=earn_amount,
+                idempotency_key=earn_key,
+            )
+            earn_transaction = earn_result.transaction
+            if earn_result.is_duplicate:
+                return PurchaseResult(
+                    earn_transaction=earn_transaction,
+                    redeem_transaction=redeem_transaction,
+                    is_duplicate=True,
+                )
+
+        if earn_transaction is None and redeem_transaction is None:
+            raise ValueError("purchase produced no loyalty operations")
+
+        return PurchaseResult(
+            earn_transaction=earn_transaction,
+            redeem_transaction=redeem_transaction,
+        )
 
     async def earn_points(
         self,

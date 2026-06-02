@@ -47,12 +47,16 @@ export function ErrorMessage({ message }: { message: string | null }) {
   return <p className="error">{message}</p>;
 }
 
-export function BottomNav() {
+export function StaffNav() {
+  const path = window.location.pathname;
   return (
     <nav className="bottom-nav">
-      <a href="/app">Покупатель</a>
-      <a href="/seller">Продавец</a>
-      <a href="/admin">Админ</a>
+      <a href="/seller" className={path.startsWith("/seller") ? "active" : undefined}>
+        Продавец
+      </a>
+      <a href="/admin" className={path.startsWith("/admin") ? "active" : undefined}>
+        Админ
+      </a>
     </nav>
   );
 }

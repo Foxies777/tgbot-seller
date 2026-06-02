@@ -1,9 +1,11 @@
+import json
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Annotated
 from uuid import uuid4
 
 from fastapi import APIRouter, File, Header, HTTPException, Request, Response, UploadFile, status
+from pydantic import ValidationError
 from PIL import Image, ImageOps
 from sqlalchemy import desc, func, select
 from sqlalchemy.exc import IntegrityError
@@ -321,45 +323,66 @@ async def verify_seller_qr(
     return _seller_customer_response(user, max_redeem)
 
 
+async def _parse_sale_request(request: Request) -> SaleRequest:
+    raw = await request.body()
+    if not raw:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Empty body")
+    try:
+        data = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Invalid JSON") from exc
+    if isinstance(data, str):
+        try:
+            data = json.loads(data)
+        except json.JSONDecodeError as exc:
+            raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Invalid JSON") from exc
+    if not isinstance(data, dict):
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "JSON body must be an object")
+    try:
+        return SaleRequest.model_validate(data)
+    except ValidationError as exc:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, detail=exc.errors()) from exc
+
+
 @router.post("/seller/sales", response_model=SaleResponse)
 async def create_sale(
-    payload: SaleRequest,
+    request: Request,
     seller_id: SellerIdDep,
     session: SessionDep,
     settings: SettingsDep,
     idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
 ):
+    payload = await _parse_sale_request(request)
     seller = await _get_active_seller(session, seller_id)
     user = await _user_from_qr_value(session, settings, payload.customer_token)
     key = idempotency_key or random_idempotency_key("sale-api")
     service = LoyaltyService(session, settings)
     try:
-        if payload.action == "earn":
-            result = await service.earn_points(
-                user_id=user.id,
-                seller_id=seller.id,
-                purchase_amount_minor=payload.purchase_amount_minor,
-                idempotency_key=key,
-            )
-        else:
-            if payload.redeem_points is None:
-                raise HTTPException(status.HTTP_400_BAD_REQUEST, "redeem_points is required")
-            result = await service.redeem_points(
-                user_id=user.id,
-                seller_id=seller.id,
-                purchase_amount_minor=payload.purchase_amount_minor,
-                requested_points=payload.redeem_points,
-                idempotency_key=key,
-            )
+        result = await service.process_purchase(
+            user_id=user.id,
+            seller_id=seller.id,
+            purchase_amount_minor=payload.purchase_amount_minor,
+            redeem_points=payload.resolved_redeem_points(),
+            idempotency_key=key,
+        )
     except InsufficientPointsError as error:
         await session.rollback()
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Insufficient points") from error
     except RedeemDisabledError as error:
         await session.rollback()
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Redeem is disabled") from error
+    except ValueError as error:
+        await session.rollback()
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(error)) from error
     await session.commit()
+    earned_points = result.earn_transaction.points_delta if result.earn_transaction else 0
+    redeemed_points = (
+        abs(result.redeem_transaction.points_delta) if result.redeem_transaction else 0
+    )
     return SaleResponse(
-        transaction=_transaction_response(result.transaction),
+        transaction=_transaction_response(result.primary_transaction),
+        earned_points=earned_points,
+        redeemed_points=redeemed_points,
         is_duplicate=result.is_duplicate,
     )
 

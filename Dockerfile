@@ -19,7 +19,7 @@ COPY pyproject.toml ./
 RUN pip install --no-cache-dir ".[dev]"
 
 COPY . .
-COPY --from=frontend-build /frontend/dist ./app/static/pwa
+COPY --from=frontend-build /app/static/pwa ./app/static/pwa
 
 ENTRYPOINT ["python", "/app/scripts/docker_entrypoint.py"]
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
