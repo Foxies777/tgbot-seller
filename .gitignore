@@ -1,9 +1,53 @@
+# Environment and local secrets
 .env
-.venv/
+.env.*
+!.env.example
+
+# Python
 __pycache__/
 *.py[cod]
+*$py.class
+.python-version
+.venv/
+venv/
+env/
+ENV/
+pip-wheel-metadata/
+*.egg-info/
+.eggs/
+build/
+dist/
+
+# Python tooling, tests and coverage
 .pytest_cache/
 .ruff_cache/
+.mypy_cache/
+.pyre/
 .coverage
+.coverage.*
+coverage.xml
 htmlcov/
+
+# Frontend dependencies and build output
+frontend/node_modules/
+frontend/dist/
+frontend/.vite/
+frontend/tsconfig.tsbuildinfo
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Generated PWA assets copied from frontend/dist
+app/static/pwa/
+
+# Docker and local services
 postgres_data/
+*.pid
+
+# IDE and OS files
+.idea/
+.vscode/
+*.code-workspace
+.DS_Store
+Thumbs.db

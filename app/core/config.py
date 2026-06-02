@@ -22,10 +22,14 @@ class Settings(BaseSettings):
 
     secret_key: SecretStr = Field(default=SecretStr("change-this-signing-secret"), min_length=16)
     admin_session_cookie: str = "loyalty_admin"
+    web_session_cookie: str = "loyalty_session"
+    consent_version: str = "2026-06-02"
+    upload_dir: str = "app/static/uploads"
 
     default_earn_percent: int = Field(default=5, ge=0, le=100)
     max_redeem_percent: int = Field(default=50, ge=0, le=100)
     point_ttl_days: int = Field(default=365, ge=1)
+    session_ttl_hours: int = Field(default=24 * 30, ge=1)
 
     @property
     def webhook_url(self) -> str:

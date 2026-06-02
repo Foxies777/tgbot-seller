@@ -223,6 +223,93 @@ class LoyaltyService:
         await self.session.flush()
         return LoyaltyResult(transaction=transaction)
 
+    async def grant_welcome_bonus(
+        self,
+        *,
+        user_id: int,
+        idempotency_key: str,
+    ) -> LoyaltyResult | None:
+        loyalty_settings = await self.get_settings()
+        if (
+            not loyalty_settings.welcome_bonus_enabled
+            or loyalty_settings.welcome_bonus_points <= 0
+        ):
+            return None
+
+        duplicate = await self._get_duplicate(idempotency_key)
+        if duplicate is not None:
+            return LoyaltyResult(transaction=duplicate, is_duplicate=True)
+
+        user = await self._lock_user(user_id)
+        transaction = await self._create_transaction(
+            user=user,
+            seller_id=None,
+            transaction_type=TransactionType.adjustment,
+            purchase_amount_minor=0,
+            points_delta=loyalty_settings.welcome_bonus_points,
+            idempotency_key=idempotency_key,
+            comment="Welcome bonus",
+            meta={"reason": "welcome_bonus"},
+        )
+        self.session.add(
+            PointLot(
+                user_id=user.id,
+                transaction_id=transaction.id,
+                original_points=loyalty_settings.welcome_bonus_points,
+                remaining_points=loyalty_settings.welcome_bonus_points,
+                expires_at=datetime.now(UTC) + timedelta(days=loyalty_settings.point_ttl_days),
+            )
+        )
+        await self.session.flush()
+        return LoyaltyResult(transaction=transaction)
+
+    async def expire_points(self, *, now: datetime | None = None) -> list[Transaction]:
+        now = now or datetime.now(UTC)
+        result = await self.session.execute(
+            select(PointLot.user_id)
+            .where(PointLot.expires_at <= now, PointLot.remaining_points > 0)
+            .distinct()
+        )
+        transactions: list[Transaction] = []
+        for user_id in result.scalars():
+            user = await self._lock_user(user_id)
+            lots_result = await self.session.execute(
+                select(PointLot)
+                .where(
+                    PointLot.user_id == user_id,
+                    PointLot.expires_at <= now,
+                    PointLot.remaining_points > 0,
+                )
+                .order_by(PointLot.expires_at.asc())
+                .with_for_update()
+            )
+            lots = list(lots_result.scalars())
+            expired_points = min(sum(lot.remaining_points for lot in lots), user.balance_points)
+            if expired_points <= 0:
+                continue
+
+            lot_ids = [lot.id for lot in lots]
+            transaction = await self._create_transaction(
+                user=user,
+                seller_id=None,
+                transaction_type=TransactionType.expiration,
+                purchase_amount_minor=0,
+                points_delta=-expired_points,
+                idempotency_key=generate_expiration_key(user.id, lot_ids),
+                comment="Expired points",
+                meta={"expired_lot_ids": lot_ids},
+            )
+            remaining = expired_points
+            for lot in lots:
+                used = min(lot.remaining_points, remaining)
+                lot.remaining_points -= used
+                remaining -= used
+                if remaining <= 0:
+                    break
+            transactions.append(transaction)
+        await self.session.flush()
+        return transactions
+
     async def _get_duplicate(self, idempotency_key: str) -> Transaction | None:
         result = await self.session.execute(
             select(Transaction).where(Transaction.idempotency_key == idempotency_key)
@@ -279,3 +366,8 @@ class LoyaltyService:
             used = min(lot.remaining_points, remaining)
             lot.remaining_points -= used
             remaining -= used
+
+
+def generate_expiration_key(user_id: int, lot_ids: list[int]) -> str:
+    lot_part = "-".join(str(lot_id) for lot_id in lot_ids)
+    return f"expiration:{user_id}:{lot_part}"

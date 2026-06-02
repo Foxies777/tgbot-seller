@@ -54,6 +54,33 @@ def verify_session_token(settings: Settings, token: str) -> str | None:
     return str(subject) if subject else None
 
 
+def make_web_session_token(
+    settings: Settings,
+    *,
+    subject: str,
+    role: str,
+    expires_in: timedelta,
+) -> str:
+    expires_at = datetime.now(UTC) + expires_in
+    return _serializer(settings, "web-session").dumps(
+        {"sub": subject, "role": role, "exp": int(expires_at.timestamp())}
+    )
+
+
+def verify_web_session_token(settings: Settings, token: str) -> dict[str, str] | None:
+    try:
+        payload: dict[str, Any] = _serializer(settings, "web-session").loads(token)
+    except BadSignature:
+        return None
+    if int(payload.get("exp", 0)) < int(datetime.now(UTC).timestamp()):
+        return None
+    subject = payload.get("sub")
+    role = payload.get("role")
+    if not subject or not role:
+        return None
+    return {"sub": str(subject), "role": str(role)}
+
+
 def hash_password(password: str) -> str:
     salt = token_bytes(16)
     password_hash = pbkdf2_hmac(
@@ -93,3 +120,12 @@ def generate_idempotency_key(*parts: object) -> str:
 
 def random_idempotency_key(prefix: str = "manual") -> str:
     return f"{prefix}:{token_urlsafe(24)}"
+
+
+def normalize_phone(phone: str) -> str:
+    digits = "".join(char for char in phone if char.isdigit())
+    if digits.startswith("8") and len(digits) == 11:
+        digits = "7" + digits[1:]
+    if len(digits) < 10:
+        raise ValueError("phone must contain at least 10 digits")
+    return f"+{digits}"

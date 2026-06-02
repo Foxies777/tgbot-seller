@@ -21,3 +21,9 @@ class TransactionType(StrEnum):
 class PromoCodeStatus(StrEnum):
     active = "active"
     disabled = "disabled"
+
+
+class SpecialOfferStatus(StrEnum):
+    draft = "draft"
+    active = "active"
+    archived = "archived"

@@ -36,8 +36,41 @@ docker compose exec app alembic upgrade head
 4. Откройте:
 
 - healthcheck: `http://localhost:8000/healthz`
-- админка: `http://localhost:8000/admin`
+- PWA покупателя: `http://localhost:8000/app`
+- регистрация покупателя: `http://localhost:8000/register`
+- кабинет продавца: `http://localhost:8000/seller`
+- React-админка: `http://localhost:8000/admin`
 - сканер: `http://localhost:8000/scan`
+
+## React/PWA
+
+Frontend находится в `frontend/` и собирается в `app/static/pwa`.
+
+```bash
+cd frontend
+npm install
+npm run build
+```
+
+Для разработки можно запускать Vite отдельно:
+
+```bash
+cd frontend
+npm run dev
+```
+
+PWA использует `display: standalone`, `apple-touch-icon`, service worker и mobile-first
+интерфейс. Для камеры, установки на iPhone и service worker в production нужен HTTPS.
+
+## Web API
+
+Новые сценарии работают через `/api/v1`:
+
+- покупатель: регистрация, вход по телефону, профиль, QR, история, спецпредложения;
+- продавец: вход, проверка QR, начисление/списание, регистрация покупателя;
+- админ: настройки бонусов, приветственные бонусы, продавцы, спецпредложения, транзакции.
+
+Для mutating-запросов продажи поддерживается заголовок `Idempotency-Key`.
 
 ## Telegram webhook
 
