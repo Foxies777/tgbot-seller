@@ -1,0 +1,36 @@
+# Environment and secrets
+.env
+.env.*
+!.env.example
+
+# Git
+.git
+.gitignore
+
+# Python caches and virtualenvs
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+
+# Frontend — installed/built inside Docker; Windows symlinks break the build context
+frontend/node_modules/
+frontend/dist/
+frontend/.vite/
+frontend/tsconfig.tsbuildinfo
+
+# Generated at build time or runtime
+app/static/pwa/
+certs/
+postgres_data/
+
+# IDE and OS
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db

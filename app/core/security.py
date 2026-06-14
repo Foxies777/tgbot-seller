@@ -11,6 +11,7 @@ from typing import Any
 from itsdangerous import BadSignature, SignatureExpired, URLSafeTimedSerializer
 
 from app.core.config import Settings
+from app.core.qr_lifetime import get_qr_expires_at
 
 PASSWORD_HASH_ITERATIONS = 390_000
 
@@ -19,8 +20,16 @@ def _serializer(settings: Settings, salt: str) -> URLSafeTimedSerializer:
     return URLSafeTimedSerializer(settings.secret_key.get_secret_value(), salt=salt)
 
 
-def sign_qr_payload(settings: Settings, user_id: int) -> str:
-    return _serializer(settings, "customer-qr").dumps({"uid": user_id})
+def sign_qr_payload(
+    settings: Settings,
+    user_id: int,
+    *,
+    expires_at: datetime | None = None,
+) -> str:
+    expiry = expires_at or get_qr_expires_at(settings)
+    return _serializer(settings, "customer-qr").dumps(
+        {"uid": user_id, "exp": int(expiry.timestamp())}
+    )
 
 
 def verify_qr_payload(
@@ -29,12 +38,21 @@ def verify_qr_payload(
     max_age_seconds: int | None = None,
 ) -> int | None:
     try:
-        payload: dict[str, Any] = _serializer(settings, "customer-qr").loads(
-            token,
-            max_age=max_age_seconds,
-        )
+        if max_age_seconds is not None:
+            payload: dict[str, Any] = _serializer(settings, "customer-qr").loads(
+                token,
+                max_age=max_age_seconds,
+            )
+        else:
+            payload = _serializer(settings, "customer-qr").loads(token)
     except (BadSignature, SignatureExpired):
         return None
+
+    exp = payload.get("exp")
+    if isinstance(exp, int):
+        if datetime.now(UTC).timestamp() >= exp:
+            return None
+
     user_id = payload.get("uid")
     return int(user_id) if isinstance(user_id, int) else None
 

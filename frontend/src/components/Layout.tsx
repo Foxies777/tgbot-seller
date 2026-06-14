@@ -3,12 +3,13 @@ import type { ReactNode } from "react";
 type LayoutProps = {
   title: string;
   subtitle?: string;
+  className?: string;
   children: ReactNode;
 };
 
-export function Layout({ title, subtitle, children }: LayoutProps) {
+export function Layout({ title, subtitle, className, children }: LayoutProps) {
   return (
-    <main className="app-shell">
+    <main className={className ? `app-shell ${className}` : "app-shell"}>
       <header className="hero">
         <div>
           <p className="eyebrow">Bonus Loyalty</p>
@@ -45,6 +46,26 @@ export function ErrorMessage({ message }: { message: string | null }) {
     return null;
   }
   return <p className="error">{message}</p>;
+}
+
+export function SectionHead({
+  icon,
+  title,
+  description
+}: {
+  icon: ReactNode;
+  title: string;
+  description: string;
+}) {
+  return (
+    <div className="admin-section-head">
+      {icon}
+      <div>
+        <h2>{title}</h2>
+        <p>{description}</p>
+      </div>
+    </div>
+  );
 }
 
 export function StaffNav() {

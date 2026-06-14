@@ -60,6 +60,16 @@ export type SpecialOffer = {
   status: string;
 };
 
+export type SellerAdmin = {
+  id: number;
+  full_name: string;
+  phone: string | null;
+  username: string | null;
+  telegram_id: number | null;
+  is_active: boolean;
+  created_at: string;
+};
+
 const API_BASE = "/api/v1";
 
 export class ApiError extends Error {

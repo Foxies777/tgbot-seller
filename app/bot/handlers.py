@@ -160,7 +160,7 @@ async def _start_sale_from_payload(
 ) -> None:
     if message.from_user is None:
         return
-    customer_id = verify_qr_payload(settings, token, settings.qr_ttl_seconds)
+    customer_id = verify_qr_payload(settings, token)
     if customer_id is None:
         await message.answer("QR-код недействителен.")
         return

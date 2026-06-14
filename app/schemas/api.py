@@ -149,6 +149,16 @@ class SellerCreateRequest(BaseModel):
     password: str = Field(min_length=8, max_length=128)
 
 
+class SellerAdminResponse(BaseModel):
+    id: int
+    full_name: str
+    phone: str | None
+    username: str | None
+    telegram_id: int | None
+    is_active: bool
+    created_at: datetime
+
+
 class SpecialOfferCreateRequest(BaseModel):
     title: str = Field(min_length=2, max_length=255)
     text: str = Field(min_length=2)

@@ -19,7 +19,7 @@ services:
       db:
         condition: service_healthy
     ports:
-      - "8000:8000"
+      - "8001:8000"
     entrypoint: ["python", "/app/scripts/docker_entrypoint.py"]
     command:
       - uvicorn

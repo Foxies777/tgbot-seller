@@ -13,10 +13,32 @@ import {
 } from "../api/client";
 import { CustomerLanding } from "../components/CustomerLanding";
 import { Card, ErrorMessage } from "../components/Layout";
+import { transactionTypeLabel } from "../utils/labels";
 
 const SWIPE_THRESHOLD_PX = 48;
 
 type CustomerTab = "card" | "history";
+
+function formatQrExpiry(expiresAt: string, secondsLeft: number): string {
+  if (secondsLeft <= 0) {
+    return "Обновление кода...";
+  }
+  const expiry = new Date(expiresAt);
+  const midnightLabel = expiry.toLocaleString("ru-RU", {
+    day: "numeric",
+    month: "short",
+    hour: "2-digit",
+    minute: "2-digit"
+  });
+  if (secondsLeft >= 3600) {
+    return `Обновится в 00:00 (${midnightLabel})`;
+  }
+  if (secondsLeft >= 60) {
+    const minutes = Math.ceil(secondsLeft / 60);
+    return `Обновится через ${minutes} мин.`;
+  }
+  return `Обновится через ${secondsLeft} сек.`;
+}
 
 export function CustomerPage() {
   const [profile, setProfile] = useState<CustomerProfile | null>(null);
@@ -54,11 +76,18 @@ export function CustomerPage() {
       return;
     }
     void refreshQr();
-    const interval = window.setInterval(() => {
+  }, [profile, tab, refreshQr]);
+
+  useEffect(() => {
+    if (!qrData || tab !== "card") {
+      return;
+    }
+    const delay = Math.max(0, new Date(qrData.expires_at).getTime() - Date.now()) + 1000;
+    const timeout = window.setTimeout(() => {
       void refreshQr();
-    }, (qrData?.ttl_seconds ?? 60) * 1000);
-    return () => window.clearInterval(interval);
-  }, [profile, tab, refreshQr, qrData?.ttl_seconds]);
+    }, delay);
+    return () => window.clearTimeout(timeout);
+  }, [qrData?.expires_at, tab, refreshQr]);
 
   useEffect(() => {
     if (!qrData) {
@@ -216,9 +245,7 @@ export function CustomerPage() {
                 <p className="customer-code-label">Код для продавца</p>
                 <strong className="customer-code">{qrData.short_code}</strong>
                 <p className="muted-light qr-expiry">
-                  {secondsLeft > 0
-                    ? `Обновится через ${secondsLeft} сек.`
-                    : "Обновление кода..."}
+                  {qrData ? formatQrExpiry(qrData.expires_at, secondsLeft) : null}
                 </p>
               </div>
             ) : null}
@@ -232,7 +259,7 @@ export function CustomerPage() {
               {transactions.map((transaction) => (
                 <article key={transaction.id} className="list-item">
                   <div>
-                    <strong>{label(transaction.transaction_type)}</strong>
+                    <strong>{transactionTypeLabel(transaction.transaction_type)}</strong>
                     <p>{new Date(transaction.created_at).toLocaleString("ru-RU")}</p>
                     {transaction.purchase_amount_minor > 0 ? (
                       <p>{moneyFromMinor(transaction.purchase_amount_minor)}</p>
@@ -266,12 +293,3 @@ function OfferPopup({ offer, onClose }: { offer: SpecialOffer; onClose: () => vo
   );
 }
 
-function label(type: string): string {
-  const labels: Record<string, string> = {
-    earn: "Начисление",
-    redeem: "Списание",
-    adjustment: "Коррекция",
-    expiration: "Сгорание"
-  };
-  return labels[type] ?? type;
-}

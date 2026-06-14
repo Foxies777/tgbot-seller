@@ -19,6 +19,7 @@ from app.api.deps import (
     clear_role_cookie,
     set_role_cookie,
 )
+from app.core.qr_lifetime import get_qr_expires_at, get_qr_ttl_seconds
 from app.core.security import (
     generate_customer_access_code,
     hash_customer_access_code,
@@ -53,6 +54,7 @@ from app.schemas.api import (
     PhoneRequest,
     SaleRequest,
     SaleResponse,
+    SellerAdminResponse,
     SellerCreateRequest,
     SellerCustomerResponse,
     SellerLoginRequest,
@@ -250,10 +252,10 @@ async def customer_me(customer_id: CustomerIdDep, session: SessionDep, settings:
 @router.get("/customer/me/qr", response_model=CustomerQrResponse)
 async def customer_qr(customer_id: CustomerIdDep, session: SessionDep, settings: SettingsDep):
     user = await _get_active_user(session, customer_id)
-    ttl = settings.qr_ttl_seconds
-    qr_token = sign_qr_payload(settings, user.id)
+    expires_at = get_qr_expires_at(settings)
+    ttl = get_qr_ttl_seconds(settings)
+    qr_token = sign_qr_payload(settings, user.id, expires_at=expires_at)
     short_code = issue_code(user.id, qr_token, ttl)
-    expires_at = datetime.now(UTC) + timedelta(seconds=ttl)
     return CustomerQrResponse(
         qr_token=qr_token,
         short_code=short_code,
@@ -429,7 +431,15 @@ async def update_admin_settings(
     return _settings_response(loyalty_settings)
 
 
-@router.post("/admin/sellers", response_model=SessionResponse)
+@router.get("/admin/sellers", response_model=list[SellerAdminResponse])
+async def list_api_sellers(_admin_id: AdminIdDep, session: SessionDep):
+    result = await session.execute(
+        select(Seller).order_by(desc(Seller.is_active), desc(Seller.id))
+    )
+    return [_seller_admin_response(seller) for seller in result.scalars()]
+
+
+@router.post("/admin/sellers", response_model=SellerAdminResponse)
 async def create_api_seller(
     payload: SellerCreateRequest,
     _admin_id: AdminIdDep,
@@ -456,7 +466,25 @@ async def create_api_seller(
         seller.password_hash = hash_password(payload.password)
         seller.is_active = True
     await session.commit()
-    return SessionResponse(role="seller", id=seller.id)
+    await session.refresh(seller)
+    return _seller_admin_response(seller)
+
+
+@router.delete("/admin/sellers/{seller_id}", response_model=SellerAdminResponse)
+async def deactivate_api_seller(
+    seller_id: int,
+    _admin_id: AdminIdDep,
+    session: SessionDep,
+):
+    seller = await session.get(Seller, seller_id)
+    if seller is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Seller not found")
+    if not seller.is_active:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Seller is already inactive")
+    seller.is_active = False
+    await session.commit()
+    await session.refresh(seller)
+    return _seller_admin_response(seller)
 
 
 @router.get("/admin/transactions", response_model=list[TransactionResponse])
@@ -565,20 +593,19 @@ async def _get_active_seller(session: SessionDep, seller_id: int) -> Seller:
 
 async def _user_from_qr_value(session: SessionDep, settings: SettingsDep, qr_value: str) -> User:
     stripped = qr_value.strip()
-    ttl = settings.qr_ttl_seconds
 
     if stripped.isdigit() and len(stripped) == 6:
         resolved = resolve_code(stripped)
         if resolved is None:
             raise HTTPException(status.HTTP_400_BAD_REQUEST, "Invalid or expired code")
         user_id, qr_token = resolved
-        verified_id = verify_qr_payload(settings, qr_token, ttl)
+        verified_id = verify_qr_payload(settings, qr_token)
         if verified_id != user_id:
             raise HTTPException(status.HTTP_400_BAD_REQUEST, "Invalid QR code")
         return await _get_active_user(session, user_id)
 
     token = _extract_qr_token(stripped)
-    user_id = verify_qr_payload(settings, token, ttl)
+    user_id = verify_qr_payload(settings, token)
     if user_id is None:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Invalid or expired QR code")
     return await _get_active_user(session, user_id)
@@ -605,6 +632,18 @@ def _transaction_response(transaction: Transaction) -> TransactionResponse:
         balance_after=transaction.balance_after,
         comment=transaction.comment,
         created_at=transaction.created_at,
+    )
+
+
+def _seller_admin_response(seller: Seller) -> SellerAdminResponse:
+    return SellerAdminResponse(
+        id=seller.id,
+        full_name=seller.full_name,
+        phone=seller.phone,
+        username=seller.username,
+        telegram_id=seller.telegram_id,
+        is_active=seller.is_active,
+        created_at=seller.created_at,
     )
 
 
