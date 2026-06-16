@@ -220,12 +220,19 @@ https://your-domain.example/telegram/webhook
 
 ## VPS deployment
 
-1. Установить Docker и Docker Compose plugin.
-2. Скопировать проект и `.env` на сервер.
-3. `docker compose up -d --build`
-4. Создать админа: `docker compose exec app python -m app.cli create-admin ...`
-5. Reverse proxy с HTTPS на `127.0.0.1:8000`.
-6. Проверить `/healthz`, войти в `/admin`, настроить webhook и отправить боту `/start`.
+Подробная инструкция: **[DEPLOY.md](DEPLOY.md)**
+
+Кратко:
+
+```bash
+cp .env.production.example .env
+# заполните секреты и домен
+./scripts/deploy_prod.sh
+# настройте HTTPS (Caddy или nginx + certbot из deploy/)
+docker compose -f docker-compose.prod.yml exec app python -m app.cli create-admin --username admin --password "YourPassword8"
+```
+
+Проверьте `https://your-domain.example/healthz` и webhook бота.
 
 ## Проверки
 

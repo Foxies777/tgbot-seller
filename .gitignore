@@ -41,6 +41,9 @@ pnpm-debug.log*
 # Generated PWA assets copied from frontend/dist
 app/static/pwa/
 
+# User uploads (offer images etc.)
+app/static/uploads/
+
 # Docker and local services
 postgres_data/
 certs/*.pem

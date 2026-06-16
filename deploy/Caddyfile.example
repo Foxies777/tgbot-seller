@@ -1,0 +1,8 @@
+# Caddy reverse proxy (auto HTTPS via Let's Encrypt).
+# Replace your-domain.example, then:
+#   sudo cp deploy/Caddyfile.example /etc/caddy/Caddyfile
+#   sudo systemctl reload caddy
+
+your-domain.example {
+    reverse_proxy 127.0.0.1:8000
+}
